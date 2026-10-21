@@ -18,7 +18,7 @@ def run_flask():
 
 # ----------------- TELEGRAM BOT SETUP -----------------
 # ⚠️ MASUKKAN TOKEN TELEGRAM BOT PENUH DARI @BotFather (JANGAN ADA '...')
-TOKEN = "8675996323:AAFKUOuSzaVCpa..."  
+TOKEN = "8675996323:AAFKUOuSzaVCpauQnAN7So1TRrjmbv_VLTI"  
 OWNER_ID = 8353544393  # ID Telegram Owner / Syezz
 
 bot = telebot.TeleBot(TOKEN)
