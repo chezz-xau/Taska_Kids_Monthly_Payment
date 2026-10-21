@@ -17,8 +17,7 @@ def run_flask():
     app.run(host='0.0.0.0', port=port)
 
 # ----------------- TELEGRAM BOT SETUP -----------------
-# ⚠️ MASUKKAN TOKEN TELEGRAM BOT PENUH DARI @BotFather (JANGAN ADA '...')
-TOKEN = "8675996323:AAFKUOuSzaVCpauQnAN7So1TRrjmbv_VLTI"  
+TOKEN = "8675996323:AAFKUOuSzaVCpauQnAN7So1TRrjmbv_VLTI"  # Token Bot Syezz
 OWNER_ID = 8353544393  # ID Telegram Owner / Syezz
 
 bot = telebot.TeleBot(TOKEN)
@@ -29,13 +28,13 @@ CHILD_OT_RATE_PER_HOUR = 5.0   # RM 5.00 per jam
 STAFF_OT_RATE_PER_HOUR = 6.0   # RM 6.00 per jam
 MONTHLY_FEE = 350.0            # Yuran Bulanan Standard (RM)
 
-# Data simulasi kanak-kanak (Termasuk Rekod Bayaran Yuran Fleksibel)
+# Data simulasi kanak-kanak
 children_data = {
-    "1": {"name": "Ahmad Rayyan", "status": "out", "time": None, "ot_fee": 0, "paid_amount": 350.0}, # Full Payment
-    "2": {"name": "Nur Zara Sofea", "status": "out", "time": None, "ot_fee": 0, "paid_amount": 150.0}, # Ansuran
-    "3": {"name": "Muhammad Umar", "status": "out", "time": None, "ot_fee": 0, "paid_amount": 700.0}, # Lump Sum (2 Bulan)
-    "4": {"name": "Siti Maryam", "status": "out", "time": None, "ot_fee": 0, "paid_amount": 0.0},   # Belum Bayar
-    "5": {"name": "Adam Harith", "status": "out", "time": None, "ot_fee": 0, "paid_amount": 0.0}    # Belum Bayar
+    "1": {"name": "Ahmad Rayyan", "status": "out", "time": None, "ot_fee": 0, "paid_amount": 350.0},
+    "2": {"name": "Nur Zara Sofea", "status": "out", "time": None, "ot_fee": 0, "paid_amount": 150.0},
+    "3": {"name": "Muhammad Umar", "status": "out", "time": None, "ot_fee": 0, "paid_amount": 700.0},
+    "4": {"name": "Siti Maryam", "status": "out", "time": None, "ot_fee": 0, "paid_amount": 0.0},
+    "5": {"name": "Adam Harith", "status": "out", "time": None, "ot_fee": 0, "paid_amount": 0.0}
 }
 
 # Data simulasi Staff / Pengasuh
@@ -47,7 +46,6 @@ staff_data = {
 
 # ----------------- HELPER: KIRA OVERTIME -----------------
 def calculate_ot_details(now_dt, rate_per_hour):
-    """Mengira jam/minit lewat selepas 6:00 PM & jumlah bayaran OT"""
     end_time = now_dt.replace(hour=OFFICE_END_HOUR, minute=0, second=0, microsecond=0)
     
     if now_dt > end_time:
@@ -85,7 +83,7 @@ def get_children_keyboard(action="checkin"):
         if action == "checkin":
             icon = "🟢" if is_checked_in else "⚪"
             status_text = f" ({child_info['time']})" if is_checked_in and child_info['time'] else ""
-        else: # checkout
+        else:
             icon = "🔴" if not is_checked_in else "🟢"
             status_text = f" ({child_info['time']})" if is_checked_in and child_info['time'] else " (Belum Hadir)"
 
@@ -104,7 +102,7 @@ def get_staff_keyboard(action="clockin"):
         if action == "clockin":
             icon = "🟢" if is_clocked_in else "⚪"
             time_str = f" ({staff_info['in_time']})" if is_clocked_in and staff_info['in_time'] else ""
-        else: # clockout
+        else:
             icon = "🔴" if not is_clocked_in else "🟢"
             time_str = f" ({staff_info['out_time']})" if not is_clocked_in and staff_info['out_time'] else ""
 
@@ -219,7 +217,7 @@ def handle_owner_operations(message):
             f"• Yuran Standard: `RM {MONTHLY_FEE:.2f} / bulan`\n"
             f"• Total Terkumpul: `RM {total_collected:.2f}`\n"
             f"• Target Bulanan: `RM {total_target:.2f}`\n\n"
-            "Tekan nama anak di bawah untuk lihat perincian / kemaskini bayaran:"
+            "Tekan nama anak di bawah untuk kemaskini bayaran:"
         )
         bot.send_message(message.chat.id, fee_msg, parse_mode="Markdown", reply_markup=get_fee_keyboard())
 
@@ -228,200 +226,4 @@ def handle_owner_operations(message):
 def handle_callback(call):
     MY_TZ = timezone(timedelta(hours=8))
     now_dt = datetime.now(MY_TZ)
-    current_time = now_dt.strftime("%I:%M %p")
-
-    # --- HANDLE KANAK-KANAK ---
-    if call.data.startswith("toggle_child_"):
-        _, _, action, child_id = call.data.split("_")
-        if child_id in children_data:
-            if action == "checkin":
-                if children_data[child_id]["status"] == "out":
-                    children_data[child_id]["status"] = "in"
-                    children_data[child_id]["time"] = current_time
-                else:
-                    children_data[child_id]["status"] = "out"
-                    children_data[child_id]["time"] = None
-                    children_data[child_id]["ot_fee"] = 0
-            else: # checkout
-                if children_data[child_id]["status"] == "in":
-                    children_data[child_id]["status"] = "out"
-                    children_data[child_id]["time"] = current_time
-                    
-                    ot_dur, ot_fee = calculate_ot_details(now_dt, CHILD_OT_RATE_PER_HOUR)
-                    children_data[child_id]["ot_fee"] = ot_fee
-                    children_data[child_id]["ot_dur"] = ot_dur
-                else:
-                    children_data[child_id]["status"] = "in"
-
-            bot.edit_message_reply_markup(
-                chat_id=call.message.chat.id,
-                message_id=call.message.message_id,
-                reply_markup=get_children_keyboard(action=action)
-            )
-            bot.answer_callback_query(call.id, text=f"Status {children_data[child_id]['name']} dikemaskini!")
-
-    elif call.data.startswith("save_child_"):
-        action = call.data.split("_")[2]
-        action_name = "Check-In" if action == "checkin" else "Check-Out"
-        
-        summary = f"🎉 **REKOD {action_name.upper()} ANAK BERJAYA DISIMPAN!**\n\n"
-        for child in children_data.values():
-            status_icon = "🟢 Hadir" if child["status"] == "in" else "🔴 Pulang/Tiada"
-            time_str = f" ({child['time']})" if child['time'] else ""
-            
-            ot_info = ""
-            if action == "checkout" and child.get("ot_fee", 0) > 0:
-                ot_info = f"\n  └ ⚠️ *OT Lewat ({child['ot_dur']}):* Caj RM{child['ot_fee']:.2f}"
-                
-            summary += f"• {child['name']}: {status_icon}{time_str}{ot_info}\n"
-
-        bot.edit_message_text(
-            chat_id=call.message.chat.id,
-            message_id=call.message.message_id,
-            text=summary,
-            parse_mode="Markdown"
-        )
-        bot.answer_callback_query(call.id, text="Rekod anak berjaya disimpan!")
-
-    # --- HANDLE STAFF / PENGASUH ---
-    elif call.data.startswith("toggle_staff_"):
-        _, _, action, staff_id = call.data.split("_")
-        if staff_id in staff_data:
-            if action == "clockin":
-                if staff_data[staff_id]["status"] == "out":
-                    staff_data[staff_id]["status"] = "in"
-                    staff_data[staff_id]["in_time"] = current_time
-                else:
-                    staff_data[staff_id]["status"] = "out"
-                    staff_data[staff_id]["in_time"] = None
-            else: # clockout
-                if staff_data[staff_id]["status"] == "in":
-                    staff_data[staff_id]["status"] = "out"
-                    staff_data[staff_id]["out_time"] = current_time
-                    
-                    ot_dur, ot_pay = calculate_ot_details(now_dt, STAFF_OT_RATE_PER_HOUR)
-                    staff_data[staff_id]["ot_pay"] = ot_pay
-                    staff_data[staff_id]["ot_dur"] = ot_dur
-                else:
-                    staff_data[staff_id]["status"] = "in"
-
-            bot.edit_message_reply_markup(
-                chat_id=call.message.chat.id,
-                message_id=call.message.message_id,
-                reply_markup=get_staff_keyboard(action=action)
-            )
-            bot.answer_callback_query(call.id, text=f"Status {staff_data[staff_id]['name']} dikemaskini!")
-
-    elif call.data.startswith("save_staff_"):
-        action = call.data.split("_")[2]
-        action_name = "Clock-In" if action == "clockin" else "Clock-Out"
-        
-        summary = f"📝 **REKOD {action_name.upper()} STAFF DISIMPAN!**\n\n"
-        for staff in staff_data.values():
-            status_icon = "🟢 Bertugas" if staff["status"] == "in" else "🔴 Selesai/Cuti"
-            time_in = f" | Masuk: {staff['in_time']}" if staff['in_time'] else ""
-            time_out = f" | Balik: {staff['out_time']}" if staff['out_time'] else ""
-            
-            ot_info = ""
-            if action == "clockout" and staff.get("ot_pay", 0) > 0:
-                ot_info = f"\n  └ ⏱️ *OT Bertugas ({staff['ot_dur']}):* Gaji OT RM{staff['ot_pay']:.2f}"
-                
-            summary += f"• {staff['name']}: {status_icon}{time_in}{time_out}{ot_info}\n"
-
-        bot.edit_message_text(
-            chat_id=call.message.chat.id,
-            message_id=call.message.message_id,
-            text=summary,
-            parse_mode="Markdown"
-        )
-        bot.answer_callback_query(call.id, text="Rekod staff berjaya disimpan!")
-
-    # --- HANDLE YURAN (VIEW & BUTTON EDIT) ---
-    elif call.data.startswith("view_fee_"):
-        if call.from_user.id != OWNER_ID:
-            bot.answer_callback_query(call.id, text="⛔ Khas untuk Owner sahaja!", show_alert=True)
-            return
-
-        child_id = call.data.split("_")[2]
-        if child_id in children_data:
-            child = children_data[child_id]
-            paid = child.get("paid_amount", 0.0)
-            balance = MONTHLY_FEE - paid
-
-            msg = (
-                f"👤 **PERINCIAN YURAN: {child['name'].upper()}**\n\n"
-                f"• Yuran Bulanan: `RM {MONTHLY_FEE:.2f}`\n"
-                f"• Jumlah Dibayar: `RM {paid:.2f}`\n"
-            )
-
-            if balance > 0:
-                msg += f"• 🔴 **Baki Tunggakan:** `RM {balance:.2f}`\n"
-            elif balance < 0:
-                msg += f"• 🔵 **Lebihan Bayaran (Lump Sum):** `RM {abs(balance):.2f}`\n"
-            else:
-                msg += "• 🟢 **Status:** `Lunas Sepenuhnya`\n"
-
-            # Butang Kemaskini Bayaran
-            markup = InlineKeyboardMarkup()
-            markup.add(InlineKeyboardButton(text="✏️ Key In / Kemaskini Bayaran", callback_data=f"edit_fee_{child_id}"))
-
-            bot.answer_callback_query(call.id)
-            bot.send_message(call.message.chat.id, msg, parse_mode="Markdown", reply_markup=markup)
-
-# ----------------- PROSES KEY IN YURAN (TEXT STEP) -----------------
-@bot.callback_query_handler(func=lambda call: call.data.startswith("edit_fee_"))
-def prompt_update_fee(call):
-    if call.from_user.id != OWNER_ID:
-        bot.answer_callback_query(call.id, text="⛔ Khas untuk Owner sahaja!", show_alert=True)
-        return
-    
-    child_id = call.data.split("_")[2]
-    child_name = children_data[child_id]["name"]
-    
-    bot.answer_callback_query(call.id)
-    sent_msg = bot.send_message(
-        call.message.chat.id,
-        f"✍️ Sila taip **jumlah bayaran terkini** (dalam nombor sahaja, contoh: `150` atau `350`) untuk **{child_name}**:",
-        parse_mode="Markdown"
-    )
-    bot.register_next_step_handler(sent_msg, save_updated_fee, child_id)
-
-def save_updated_fee(message, child_id):
-    if message.from_user.id != OWNER_ID:
-        return
-    
-    try:
-        new_amount = float(message.text.strip())
-        children_data[child_id]["paid_amount"] = new_amount
-        
-        child_name = children_data[child_id]["name"]
-        balance = MONTHLY_FEE - new_amount
-        
-        confirmation = (
-            f"✅ **BERJAYA DIKEMASKINI!**\n\n"
-            f"• Nama Anak: `{child_name}`\n"
-            f"• Jumlah Dibayar Baru: `RM {new_amount:.2f}`\n"
-        )
-        if balance > 0:
-            confirmation += f"• 🔴 **Baki Tunggakan:** `RM {balance:.2f}`"
-        elif balance < 0:
-            confirmation += f"• 🔵 **Lebihan Bayaran:** `RM {abs(balance):.2f}`"
-        else:
-            confirmation += "• 🟢 **Status:** `Lunas Sepenuhnya`"
-            
-        bot.send_message(message.chat.id, confirmation, parse_mode="Markdown")
-        
-    except ValueError:
-        bot.send_message(
-            message.chat.id, 
-            "❌ **Ralat:** Sila masukkan nombor sahaja (Contoh: `200` atau `350.50`). Sila tekan semula butang kemaskini."
-        )
-
-# ----------------- MAIN RUNNER -----------------
-if __name__ == "__main__":
-    t = Thread(target=run_flask)
-    t.daemon = True
-    t.start()
-    
-    print("Bot Taska sedang berjalan...")
-    bot.infinity_polling()
+    current_time = now_dt.strftime("%I:%
