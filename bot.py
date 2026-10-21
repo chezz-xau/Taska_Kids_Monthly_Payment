@@ -23,14 +23,14 @@ OWNER_ID = 8353544393  # ID Telegram Owner / Syezz
 bot = telebot.TeleBot(TOKEN)
 
 # TETAPAN OT & WAKTU OPERATION
-OFFICE_END_HOUR = 18  # 6:00 PM (18:00)
+OFFICE_END_HOUR = 18          # 6:00 PM (18:00)
 CHILD_OT_RATE_PER_HOUR = 5.0   # RM 5.00 per jam
 STAFF_OT_RATE_PER_HOUR = 6.0   # RM 6.00 per jam
 MONTHLY_FEE = 350.0            # Yuran Bulanan Standard (RM)
 
 # Data simulasi kanak-kanak (Termasuk Rekod Bayaran Yuran Fleksibel)
 children_data = {
-    "1": {"name": "Ahmad Rayyan", "status": "out", "time": None, "ot_fee": 0, "paid_amount": 350.0}, # Full
+    "1": {"name": "Ahmad Rayyan", "status": "out", "time": None, "ot_fee": 0, "paid_amount": 350.0}, # Full Payment
     "2": {"name": "Nur Zara Sofea", "status": "out", "time": None, "ot_fee": 0, "paid_amount": 150.0}, # Ansuran
     "3": {"name": "Muhammad Umar", "status": "out", "time": None, "ot_fee": 0, "paid_amount": 700.0}, # Lump Sum (2 Bulan)
     "4": {"name": "Siti Maryam", "status": "out", "time": None, "ot_fee": 0, "paid_amount": 0.0},   # Belum Bayar
@@ -149,33 +149,30 @@ def send_welcome(message):
     )
 
 # ----------------- HANDLER MENU OPERASI STAFF -----------------
-@bot.message_handler(func=lambda msg: msg.text in [
-    "📥 Check-In Anak", "📤 Check-Out Anak", 
-    "🟢 Clock-In Staff", "🔴 Clock-Out Staff"
-])
+@bot.message_handler(func=lambda msg: any(cmd in msg.text for cmd in ["Check-In Anak", "Check-Out Anak", "Clock-In Staff", "Clock-Out Staff"]))
 def handle_staff_operations(message):
-    if message.text == "📥 Check-In Anak":
+    if "Check-In Anak" in message.text:
         bot.send_message(
             message.chat.id,
             "📋 **SENARAI CHECK-IN KANAK-KANAK**\n\nTekan nama anak untuk tandakan kehadiran (🟢 = Hadir, ⚪ = Belum):",
             parse_mode="Markdown",
             reply_markup=get_children_keyboard(action="checkin")
         )
-    elif message.text == "📤 Check-Out Anak":
+    elif "Check-Out Anak" in message.text:
         bot.send_message(
             message.chat.id,
             "📋 **SENARAI CHECK-OUT KANAK-KANAK**\n\nTekan nama anak untuk tanda pulang (🔴 = Dah Pulang, 🟢 = Di Taska):",
             parse_mode="Markdown",
             reply_markup=get_children_keyboard(action="checkout")
         )
-    elif message.text == "🟢 Clock-In Staff":
+    elif "Clock-In Staff" in message.text or "Clock-In Pengasuh" in message.text:
         bot.send_message(
             message.chat.id,
             "👩‍🏫 **CLOCK-IN STAFF / PENGASUH**\n\nTekan nama staff untuk tandakan kedatangan (🟢 = Masuk Kerja):",
             parse_mode="Markdown",
             reply_markup=get_staff_keyboard(action="clockin")
         )
-    elif message.text == "🔴 Clock-Out Staff":
+    elif "Clock-Out Staff" in message.text or "Clock-Out Pengasuh" in message.text:
         bot.send_message(
             message.chat.id,
             "👩‍🏫 **CLOCK-OUT STAFF / PENGASUH**\n\nTekan nama staff untuk tandakan waktu balik (🔴 = Balik Kerja):",
@@ -184,13 +181,13 @@ def handle_staff_operations(message):
         )
 
 # ----------------- HANDLER MENU OWNER -----------------
-@bot.message_handler(func=lambda msg: msg.text in ["📊 Laporan Bulanan", "💳 Status & Bayaran Yuran"])
+@bot.message_handler(func=lambda msg: any(cmd in msg.text for cmd in ["Laporan Bulanan", "Status & Bayaran Yuran"]))
 def handle_owner_operations(message):
     if message.from_user.id != OWNER_ID:
         bot.send_message(message.chat.id, "⛔ Akses ditolak. Menu ini khas untuk Owner sahaja.")
         return
 
-    if message.text == "📊 Laporan Bulanan":
+    if "Laporan Bulanan" in message.text:
         total_children = len(children_data)
         children_in = sum(1 for c in children_data.values() if c["status"] == "in")
         total_child_ot = sum(c.get("ot_fee", 0) for c in children_data.values())
@@ -212,7 +209,7 @@ def handle_owner_operations(message):
         )
         bot.send_message(message.chat.id, report_msg, parse_mode="Markdown")
 
-    elif message.text == "💳 Status & Bayaran Yuran":
+    elif "Status & Bayaran Yuran" in message.text:
         total_collected = sum(c.get("paid_amount", 0.0) for c in children_data.values())
         total_target = len(children_data) * MONTHLY_FEE
 
