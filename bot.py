@@ -17,7 +17,7 @@ def run_flask():
     app.run(host='0.0.0.0', port=port)
 
 # ----------------- TELEGRAM BOT SETUP -----------------
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TOKEN = "8675996323:AAFKUOuSzaVCpauQnAN7So1TRrjmbv_VLTI"
 bot = telebot.TeleBot(TOKEN)
 
 # Data simulasi kanak-kanak
