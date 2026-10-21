@@ -18,7 +18,7 @@ def run_flask():
 
 # ----------------- TELEGRAM BOT SETUP -----------------
 # Masukkan token bot Syezz dari @BotFather di dalam pembuka & penutup kata " "
-TOKEN = "TAMPAL_BOT_TOKEN_SYEZZ_DI_SINI"
+TOKEN = "8675996323:AAFKUOuSzaVCpauQnAN7So1TRrjmbv_VLTI"
 bot = telebot.TeleBot(TOKEN)
 
 # Data simulasi kanak-kanak
