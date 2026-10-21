@@ -17,7 +17,7 @@ def run_flask():
     app.run(host='0.0.0.0', port=port)
 
 # ----------------- TELEGRAM BOT SETUP -----------------
-TOKEN = "8675996323:AAFKUOuSzaVCpa..."  # Token Bot Syezz
+TOKEN = "8675996323:AAFKUOuSzaVCpauQnAN7So1TRrjmbv_VLTI"  # Token Bot Syezz
 OWNER_ID = 8353544393  # ID Telegram Owner / Syezz
 
 bot = telebot.TeleBot(TOKEN)
