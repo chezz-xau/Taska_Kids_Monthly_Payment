@@ -1,5 +1,7 @@
-python-telegram-bot
+pyTelegramBotAPI
+flask
 pandas
 openpyxl
 python-dotenv
+
 
