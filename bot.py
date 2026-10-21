@@ -17,7 +17,8 @@ def run_flask():
     app.run(host='0.0.0.0', port=port)
 
 # ----------------- TELEGRAM BOT SETUP -----------------
-TOKEN = "8675996323:AAFKUOuSzaVCpauQnAN7So1TRrjmbv_VLTI"  # Token Bot Syezz
+# ⚠️ MASUKKAN TOKEN TELEGRAM BOT PENUH DARI @BotFather (JANGAN ADA '...')
+TOKEN = "8675996323:AAFKUOuSzaVCpa..."  
 OWNER_ID = 8353544393  # ID Telegram Owner / Syezz
 
 bot = telebot.TeleBot(TOKEN)
@@ -218,7 +219,7 @@ def handle_owner_operations(message):
             f"• Yuran Standard: `RM {MONTHLY_FEE:.2f} / bulan`\n"
             f"• Total Terkumpul: `RM {total_collected:.2f}`\n"
             f"• Target Bulanan: `RM {total_target:.2f}`\n\n"
-            "Tekan nama anak di bawah untuk lihat perincian bayaran:"
+            "Tekan nama anak di bawah untuk lihat perincian / kemaskini bayaran:"
         )
         bot.send_message(message.chat.id, fee_msg, parse_mode="Markdown", reply_markup=get_fee_keyboard())
 
@@ -335,7 +336,7 @@ def handle_callback(call):
         )
         bot.answer_callback_query(call.id, text="Rekod staff berjaya disimpan!")
 
-    # --- HANDLE YURAN (OWNER ONLY) ---
+    # --- HANDLE YURAN (VIEW & BUTTON EDIT) ---
     elif call.data.startswith("view_fee_"):
         if call.from_user.id != OWNER_ID:
             bot.answer_callback_query(call.id, text="⛔ Khas untuk Owner sahaja!", show_alert=True)
@@ -360,8 +361,61 @@ def handle_callback(call):
             else:
                 msg += "• 🟢 **Status:** `Lunas Sepenuhnya`\n"
 
+            # Butang Kemaskini Bayaran
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton(text="✏️ Key In / Kemaskini Bayaran", callback_data=f"edit_fee_{child_id}"))
+
             bot.answer_callback_query(call.id)
-            bot.send_message(call.message.chat.id, msg, parse_mode="Markdown")
+            bot.send_message(call.message.chat.id, msg, parse_mode="Markdown", reply_markup=markup)
+
+# ----------------- PROSES KEY IN YURAN (TEXT STEP) -----------------
+@bot.callback_query_handler(func=lambda call: call.data.startswith("edit_fee_"))
+def prompt_update_fee(call):
+    if call.from_user.id != OWNER_ID:
+        bot.answer_callback_query(call.id, text="⛔ Khas untuk Owner sahaja!", show_alert=True)
+        return
+    
+    child_id = call.data.split("_")[2]
+    child_name = children_data[child_id]["name"]
+    
+    bot.answer_callback_query(call.id)
+    sent_msg = bot.send_message(
+        call.message.chat.id,
+        f"✍️ Sila taip **jumlah bayaran terkini** (dalam nombor sahaja, contoh: `150` atau `350`) untuk **{child_name}**:",
+        parse_mode="Markdown"
+    )
+    bot.register_next_step_handler(sent_msg, save_updated_fee, child_id)
+
+def save_updated_fee(message, child_id):
+    if message.from_user.id != OWNER_ID:
+        return
+    
+    try:
+        new_amount = float(message.text.strip())
+        children_data[child_id]["paid_amount"] = new_amount
+        
+        child_name = children_data[child_id]["name"]
+        balance = MONTHLY_FEE - new_amount
+        
+        confirmation = (
+            f"✅ **BERJAYA DIKEMASKINI!**\n\n"
+            f"• Nama Anak: `{child_name}`\n"
+            f"• Jumlah Dibayar Baru: `RM {new_amount:.2f}`\n"
+        )
+        if balance > 0:
+            confirmation += f"• 🔴 **Baki Tunggakan:** `RM {balance:.2f}`"
+        elif balance < 0:
+            confirmation += f"• 🔵 **Lebihan Bayaran:** `RM {abs(balance):.2f}`"
+        else:
+            confirmation += "• 🟢 **Status:** `Lunas Sepenuhnya`"
+            
+        bot.send_message(message.chat.id, confirmation, parse_mode="Markdown")
+        
+    except ValueError:
+        bot.send_message(
+            message.chat.id, 
+            "❌ **Ralat:** Sila masukkan nombor sahaja (Contoh: `200` atau `350.50`). Sila tekan semula butang kemaskini."
+        )
 
 # ----------------- MAIN RUNNER -----------------
 if __name__ == "__main__":
