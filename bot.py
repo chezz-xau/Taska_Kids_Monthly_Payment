@@ -1,13 +1,26 @@
 import os
+from threading import Thread
 from datetime import datetime
+from flask import Flask
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 
-# Ambil Token dari Environment Variable Render
+# ----------------- FLASK FOR RENDER HEALTH CHECK -----------------
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Bot Taska is running!"
+
+def run_flask():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
+
+# ----------------- TELEGRAM BOT SETUP -----------------
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 bot = telebot.TeleBot(TOKEN)
 
-# Data simulasi kanak-kanak (Boleh diganti dengan Database/SQLite kemudian)
+# Data simulasi kanak-kanak
 children_data = {
     "1": {"name": "Ahmad Rayyan", "status": "out", "time": None},
     "2": {"name": "Nur Zara Sofea", "status": "out", "time": None},
@@ -43,7 +56,6 @@ def get_children_keyboard(action="checkin"):
         callback_data = f"toggle_{action}_{child_id}"
         markup.add(InlineKeyboardButton(text=btn_text, callback_data=callback_data))
 
-    # Butang Simpan / Selesai
     save_text = "✅ Simpan & Sahkan Check-In" if action == "checkin" else "✅ Simpan & Sahkan Check-Out"
     markup.add(InlineKeyboardButton(text=save_text, callback_data=f"save_{action}"))
     return markup
@@ -76,32 +88,29 @@ def handle_checkin_checkout_menu(message):
             reply_markup=get_children_keyboard(action="checkout")
         )
 
-# ----------------- CALLBACK QUERY HANDLER (TOGGLE & SAVE) -----------------
+# ----------------- CALLBACK QUERY HANDLER -----------------
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callback(call):
     current_time = datetime.now().strftime("%I:%M %p")
 
-    # Toggle Check-In / Check-Out
     if call.data.startswith("toggle_"):
         _, action, child_id = call.data.split("_")
         
         if child_id in children_data:
             if action == "checkin":
-                # Tukar status: in / out
                 if children_data[child_id]["status"] == "out":
                     children_data[child_id]["status"] = "in"
                     children_data[child_id]["time"] = current_time
                 else:
                     children_data[child_id]["status"] = "out"
                     children_data[child_id]["time"] = None
-            else: # checkout
+            else:
                 if children_data[child_id]["status"] == "in":
                     children_data[child_id]["status"] = "out"
                     children_data[child_id]["time"] = current_time
                 else:
                     children_data[child_id]["status"] = "in"
 
-            # Kemaskini Keyboard secara real-time tanpa hantar mesej baru
             bot.edit_message_reply_markup(
                 chat_id=call.message.chat.id,
                 message_id=call.message.message_id,
@@ -109,12 +118,10 @@ def handle_callback(call):
             )
             bot.answer_callback_query(call.id, text=f"Status {children_data[child_id]['name']} dikemaskini!")
 
-    # Simpan Rekod
     elif call.data.startswith("save_"):
         action = call.data.split("_")[1]
         action_name = "Check-In" if action == "checkin" else "Check-Out"
         
-        # Papar rumusan
         summary = f"🎉 **REKOD {action_name.upper()} BERJAYA DISIMPAN!**\n\n"
         for child in children_data.values():
             status_icon = "🟢 Hadir" if child["status"] == "in" else "🔴 Pulang/Tiada"
@@ -129,7 +136,12 @@ def handle_callback(call):
         )
         bot.answer_callback_query(call.id, text="Rekod berjaya disimpan!")
 
-# ----------------- RUN BOT -----------------
+# ----------------- MAIN RUNNER -----------------
 if __name__ == "__main__":
+    # Jalankan Flask dalam Thread berasingan
+    t = Thread(target=run_flask)
+    t.daemon = True
+    t.start()
+    
     print("Bot Taska sedang berjalan...")
     bot.infinity_polling()
