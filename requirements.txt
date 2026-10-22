@@ -3,5 +3,8 @@ flask
 pandas
 openpyxl
 python-dotenv
+gunicorn
+pytz
+
 
 
