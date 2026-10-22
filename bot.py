@@ -2,7 +2,7 @@ import os
 import telebot
 from flask import Flask, abort, request
 
-# Ambil TOKEN dari Environment Variables Render (TELEGRAM_TOKEN)
+# Ambil TOKEN dari Environment Variables Render
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 if not TOKEN:
   raise ValueError("TELEGRAM_TOKEN tidak ditetapkan dalam environment variables!")
@@ -83,16 +83,20 @@ def handle_fallback(message):
   )
 
 
-# 4. Fungsi Tetapan Webhook Automatik
+# 4. Fungsi Tetapan Webhook (Dijalankan terus semasa aplikasi mula)
 def set_webhook():
-  render_url = "https://taska-kids-monthly-payment.onrender.com"  # URL Render anda
+  render_url = (
+      "https://taska-kids-monthly-payment.onrender.com"  # URL Render anda
+  )
   webhook_url = f"{render_url}/{TOKEN}"
   bot.remove_webhook()
   bot.set_webhook(url=webhook_url)
   print(f"Webhook dipautkan ke: {webhook_url}")
 
 
+# Panggil fungsi webhook secara langsung supaya Gunicorn turut melaksanakannya
+set_webhook()
+
 if __name__ == "__main__":
-  set_webhook()
   port = int(os.environ.get("PORT", 5000))
   app.run(host="0.0.0.0", port=port)
