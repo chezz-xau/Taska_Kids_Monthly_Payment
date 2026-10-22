@@ -5,7 +5,7 @@ import telebot
 from flask import Flask, abort, request
 from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-# 1. Ambil TOKEN dan Inisytiharkan Bot & Flask DI ATAS SEKALI
+# 1. Ambil TOKEN dan Inisytiharkan Bot & Flask
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 if not TOKEN:
   raise ValueError("TELEGRAM_TOKEN tidak ditetapkan dalam environment variables!")
@@ -136,7 +136,7 @@ def handle_status_yuran(message):
   bot.reply_to(message, "💳 Memaparkan Status & Bayaran Yuran.")
 
 
-# Handler Laporan Kehadiran Hari Ini
+# Handler Laporan Kehadiran Hari Ini (Menyokong perkataan Laporan)
 @bot.message_handler(
     func=lambda message: message.text and "Laporan" in message.text
 )
