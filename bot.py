@@ -1,8 +1,9 @@
 import os
 import telebot
 from flask import Flask, abort, request
+from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-# Ambil TOKEN dari Environment Variables Render
+# Ambil TOKEN dari Environment Variables Render (TELEGRAM_TOKEN)
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 if not TOKEN:
   raise ValueError("TELEGRAM_TOKEN tidak ditetapkan dalam environment variables!")
@@ -30,7 +31,7 @@ def webhook():
 
 
 # ==========================================
-# 3. HANDLER BUTANG TELEGRAM
+# 3. HANDLER BUTANG TELEGRAM & MENU
 # ==========================================
 
 
@@ -48,11 +49,24 @@ def handle_check_out_anak(message):
   bot.reply_to(message, "📤 Check-Out Anak diterima (Logik Excel menyusul).")
 
 
+# Handler untuk butang Clock-In Staff (Memaparkan Senarai Nama)
 @bot.message_handler(
     func=lambda message: message.text and "Clock-In Staff" in message.text
 )
 def handle_clock_in_staff(message):
-  bot.reply_to(message, "🟢 Clock-In Staff direkodkan.")
+  markup = InlineKeyboardMarkup()
+  staff_list = ["Siti Maryam", "Adam Harith"]
+
+  for name in staff_list:
+    markup.add(
+        InlineKeyboardButton(
+            f"🔴 {name} (Belum Hadir)", callback_data=f"clockin_{name}"
+        )
+    )
+
+  bot.reply_to(
+      message, "Sila pilih nama staff untuk Clock-In:", reply_markup=markup
+  )
 
 
 @bot.message_handler(
@@ -76,6 +90,18 @@ def handle_laporan_bulanan(message):
   bot.reply_to(message, "📊 Menjana Laporan Bulanan Taska.")
 
 
+# Handler Callback untuk Inline Button Nama Staff
+@bot.callback_query_handler(func=lambda call: call.data.startswith("clockin_"))
+def callback_clockin(call):
+  staff_name = call.data.split("_")[1]
+  bot.answer_callback_query(call.id, f"{staff_name} telah Clock-In!")
+  bot.edit_message_text(
+      chat_id=call.message.chat.id,
+      message_id=call.message.message_id,
+      text=f"🟢 {staff_name} telah berjaya Clock-In!",
+  )
+
+
 @bot.message_handler(func=lambda message: True)
 def handle_fallback(message):
   bot.reply_to(
@@ -83,7 +109,7 @@ def handle_fallback(message):
   )
 
 
-# 4. Fungsi Tetapan Webhook (Dijalankan terus semasa aplikasi mula)
+# 4. Fungsi Tetapan Webhook
 def set_webhook():
   render_url = (
       "https://taska-kids-monthly-payment.onrender.com"  # URL Render anda
@@ -94,7 +120,7 @@ def set_webhook():
   print(f"Webhook dipautkan ke: {webhook_url}")
 
 
-# Panggil fungsi webhook secara langsung supaya Gunicorn turut melaksanakannya
+# Panggil fungsi webhook secara terus untuk Gunicorn
 set_webhook()
 
 if __name__ == "__main__":
