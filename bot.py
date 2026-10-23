@@ -84,7 +84,7 @@ def get_main_branch_menu():
 
 
 def get_sub_menu(branch_name):
-    """Sub-Menu Utama mengikut Cawangan"""
+    """Sub-Menu Utama mengikut Cawangan (Tukar Cawangan Dipadamkan)"""
     markup = ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
     markup.add(
         KeyboardButton("📥 Check-In Anak"),
@@ -108,8 +108,7 @@ def get_sub_menu(branch_name):
         KeyboardButton("📊 Laporan")
     )
     markup.add(
-        KeyboardButton("❌ Keluarkan Dari Senarai"),
-        KeyboardButton("🔙 Tukar Cawangan")
+        KeyboardButton("❌ Keluarkan Dari Senarai")
     )
     return markup
 
@@ -155,18 +154,6 @@ def handle_branch_selection(message):
         f"Anda telah memilih *{branch}*.\nSila pilih menu tindakan di bawah:",
         parse_mode="Markdown",
         reply_markup=get_sub_menu(branch),
-    )
-
-
-# Handler Tukar Cawangan
-@bot.message_handler(
-    func=lambda message: message.text and "Tukar Cawangan" in message.text
-)
-def handle_change_branch(message):
-    bot.reply_to(
-        message,
-        "Sila pilih cawangan taska:",
-        reply_markup=get_main_branch_menu(),
     )
 
 
