@@ -24,11 +24,26 @@ MY_TZ = timezone(timedelta(hours=8))
 STAFF_LIST = ["Siti Maryam", "Adam Harith"]
 KIDS_LIST = ["Ahmad", "Aisha", "Rayyan"]
 
-# Simpanan Sesi & Status Sementara (Dalam Memori Bot)
+# Yuran bulanan standard asal (boleh diubah mengikut keperluan)
+STANDARD_FEE = 300.0
+
+# Simpanan Sesi & Status Kehadiran Beserta Waktu
 user_branches = {}
 active_checkins = {}      # Format: {"Taska 1": {"Ahmad": "08:15 AM"}}
 active_staff_clockin = {} # Format: {"Taska 1": {"Siti Maryam": "07:45 AM"}}
-fee_status = {}           # Format: {"Taska 1": {"Ahmad": "Belum Bayar", "Aisha": "Lunas", ...}}
+
+# Rekod Pengurusan Yuran Terperinci
+# Format: {"Taska 1": {"Ahmad": {"perlu": 300, "dibayar": 300}, "Aisha": {"perlu": 300, "dibayar": 100}}}
+kids_fees = {}
+
+
+def get_kid_fee_data(branch, kid_name):
+    """Fungsi pembantu untuk mengambil atau mendaftar rekod yuran anak"""
+    if branch not in kids_fees:
+        kids_fees[branch] = {}
+    if kid_name not in kids_fees[branch]:
+        kids_fees[branch][kid_name] = {"perlu": STANDARD_FEE, "dibayar": 0.0}
+    return kids_fees[branch][kid_name]
 
 
 # --- KEYBOARD MENUS ---
@@ -265,7 +280,7 @@ def handle_ot_staff(message):
     )
 
 
-# Handler Pendaftaran Baru Anak-Anak (Papar 3 Pilihan Cawangan)
+# Handler Pendaftaran Baru Anak-Anak
 @bot.message_handler(
     func=lambda message: message.text and "Pendaftaran Baru Anak-Anak" in message.text
 )
@@ -284,7 +299,7 @@ def handle_pendaftaran_baru(message):
     )
 
 
-# Handler Keluarkan Dari Senarai (Papar 3 Pilihan Cawangan)
+# Handler Keluarkan Dari Senarai
 @bot.message_handler(
     func=lambda message: message.text and "Keluarkan Dari Senarai" in message.text
 )
@@ -303,7 +318,7 @@ def handle_keluarkan_senarai(message):
     )
 
 
-# Handler Status & Bayaran Yuran (Papar 3 Pilihan Cawangan)
+# Handler Status & Bayaran Yuran
 @bot.message_handler(
     func=lambda message: message.text and "Status & Bayaran Yuran" in message.text
 )
@@ -431,7 +446,7 @@ def callback_clockout_staff(call):
     )
 
 
-# --- CALLBACKS UNTUK YURAN (DENGAN PILIHAN CAWANGAN) ---
+# --- CALLBACKS UNTUK YURAN (DENGAN SENARAI TERPERINCI) ---
 @bot.callback_query_handler(func=lambda call: call.data.startswith("fee_branch_"))
 def callback_fee_branch(call):
     branch = call.data.replace("fee_branch_", "")
@@ -439,7 +454,7 @@ def callback_fee_branch(call):
     markup = InlineKeyboardMarkup()
     markup.add(
         InlineKeyboardButton("📋 Semak Status Yuran Anak", callback_data=f"fee_check_{branch}"),
-        InlineKeyboardButton("✅ Kemaskini Status Yuran (Lunas)", callback_data=f"fee_update_{branch}")
+        InlineKeyboardButton("✅ Set Yuran Lunas (Penuh)", callback_data=f"fee_update_{branch}")
     )
     bot.edit_message_text(
         chat_id=call.message.chat.id,
@@ -450,20 +465,30 @@ def callback_fee_branch(call):
     )
 
 
+# Semakan Status Terperinci (Jumlah Perlu Dibayar, Jumlah Dah Dibayar, Baki, Lunas)
 @bot.callback_query_handler(func=lambda call: call.data.startswith("fee_check_"))
 def callback_fee_check(call):
     branch = call.data.replace("fee_check_", "")
     
-    if branch not in fee_status:
-        fee_status[branch] = {name: "Belum Bayar" for name in KIDS_LIST}
-        
-    text = f"📋 **Status Yuran Semasa - [{branch}]**\n\n"
+    text = f"💳 **Penyata Status Yuran - [{branch}]**\n\n"
+    
     for name in KIDS_LIST:
-        status = fee_status[branch].get(name, "Belum Bayar")
-        icon = "✅" if status == "Lunas" else "❌"
-        text += f"• {name}: {icon} *{status}*\n"
+        data = get_kid_fee_data(branch, name)
+        perlu = data["perlu"]
+        dibayar = data["dibayar"]
+        baki = perlu - dibayar
         
-    bot.answer_callback_query(call.id, "Memaparkan status yuran.")
+        status_str = "✅ *Lunas*" if baki <= 0 else "❌ *Belum Lunas*"
+        
+        text += (
+            f"👶 **{name}**\n"
+            f"• Jumlah Perlu Dibayar: RM {perlu:.2f}\n"
+            f"• Jumlah Dah Dibayar: RM {dibayar:.2f}\n"
+            f"• Baki: RM {baki:.2f}\n"
+            f"• Status: {status_str}\n\n"
+        )
+        
+    bot.answer_callback_query(call.id, "Memaparkan ringkasan yuran.")
     bot.edit_message_text(
         chat_id=call.message.chat.id,
         message_id=call.message.message_id,
@@ -486,7 +511,7 @@ def callback_fee_update(call):
     bot.edit_message_text(
         chat_id=call.message.chat.id,
         message_id=call.message.message_id,
-        text=f"💳 **[{branch}] Kemaskini Status Yuran**\nSila pilih anak yang telah menjelaskan yuran:",
+        text=f"💳 **[{branch}] Kemaskini Status Yuran**\nSila pilih anak yang telah menjelaskan yuran sepenuhnya:",
         parse_mode="Markdown",
         reply_markup=markup
     )
@@ -498,15 +523,21 @@ def callback_set_fee_paid(call):
     branch = parts[0]
     kid_name = parts[1]
     
-    if branch not in fee_status:
-        fee_status[branch] = {}
-    fee_status[branch][kid_name] = "Lunas"
+    data = get_kid_fee_data(branch, kid_name)
+    data["dibayar"] = data["perlu"]  # Set bayaran penuh
     
     bot.answer_callback_query(call.id, f"Yuran {kid_name} dikemaskini kepada Lunas!")
     bot.edit_message_text(
         chat_id=call.message.chat.id,
         message_id=call.message.message_id,
-        text=f"✅ [{branch}] Status yuran untuk **{kid_name}** telah berjaya dikemaskini kepada **Lunas**!",
+        text=(
+            f"✅ **[{branch}] Kemaskini Berjaya!**\n\n"
+            f"👶 **{kid_name}**\n"
+            f"• Jumlah Perlu Dibayar: RM {data['perlu']:.2f}\n"
+            f"• Jumlah Dah Dibayar: RM {data['dibayar']:.2f}\n"
+            f"• Baki: RM 0.00\n"
+            f"• Status: ✅ **Lunas**"
+        ),
         parse_mode="Markdown"
     )
 
