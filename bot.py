@@ -18,7 +18,7 @@ TELEGRAM_CHAT_ID = "8353544393"                       # Chat ID Owner (Laporan 1
 
 # Senarai ID Telegram Owner & Staff
 OWNER_IDS = ["8353544393"]               # Masukkan Chat ID Owner
-STAFF_IDS = ["111222333", "444555666"]      # Masukkan Chat ID Staff
+STAFF_IDS = ["1158219769", "444555666"]      # Masukkan Chat ID Staff
 # ==========================================
 
 if not TELEGRAM_TOKEN:
