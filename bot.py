@@ -14,10 +14,10 @@ from apscheduler.schedulers.background import BackgroundScheduler
 # ⚙️ TETAPAN UTAMA & KAWALAN AKSES (ROLES)
 # ==========================================
 TELEGRAM_TOKEN = "8675996323:AAFFlD67gt2HXet63MKEo08iJYm8ojVcol0"  # Token Bot Anda
-TELEGRAM_CHAT_ID = "8353544393"                       # Chat ID Owner (Laporan 11 malam dihantar ke sini)
+TELEGRAM_CHAT_ID = "8353544393"                       # Chat ID Owner (Laporan 11 malam)
 
 # Senarai ID Telegram Owner & Staff
-OWNER_IDS = ["8353544393"]               # Masukkan Chat ID Owner (cth: ["123456789"])
+OWNER_IDS = ["8353544393"]               # Masukkan Chat ID Owner
 STAFF_IDS = ["111222333", "444555666"]      # Masukkan Chat ID Staff
 # ==========================================
 
@@ -49,20 +49,23 @@ daily_logs = {
     } for branch in BRANCHES
 }
 
-# Rekod Pengurusan Yuran
+# 💳 REKOD PENGURUSAN YURAN & MAKLUMAT PENDAFTARAN LENGKAP
+# Format: {"Taska 1": {"Ahmad": {"parent": "Ali", "phone": "0123456789", "perlu": 300.0, "dibayar": 0.0}}}
 kids_fees = {
     "Taska 1": {
-        "Ahmad": {"perlu": 300.0, "dibayar": 0.0},
-        "Aisha": {"perlu": 300.0, "dibayar": 0.0},
-        "Rayyan": {"perlu": 300.0, "dibayar": 0.0},
-    }
+        "Ahmad": {"parent": "Encik Razak", "phone": "0123456789", "perlu": 300.0, "dibayar": 0.0},
+        "Aisha": {"parent": "Puan Aminah", "phone": "0198765432", "perlu": 300.0, "dibayar": 0.0},
+        "Rayyan": {"parent": "Encik Kamal", "phone": "0171122334", "perlu": 300.0, "dibayar": 0.0},
+    },
+    "Taska 2": {},
+    "Taska 3": {}
 }
 
 def get_kid_fee_data(branch, kid_name):
     if branch not in kids_fees:
         kids_fees[branch] = {}
     if kid_name not in kids_fees[branch]:
-        kids_fees[branch][kid_name] = {"perlu": 300.0, "dibayar": 0.0}
+        kids_fees[branch][kid_name] = {"parent": "-", "phone": "-", "perlu": 300.0, "dibayar": 0.0}
     return kids_fees[branch][kid_name]
 
 
@@ -77,7 +80,7 @@ def jana_teks_laporan_lengkap_semua_cawangan():
     for branch in BRANCHES:
         report_text += f"🏠 **[{branch.upper()}]**\n"
         
-        # --- 1. REKOD KANAK-KANAK ---
+        # 1. Rekod Anak
         report_text += "👶 **Kehadiran Kanak-Kanak:**\n"
         kids_data = daily_logs[branch]["kids"]
         if kids_data:
@@ -89,7 +92,7 @@ def jana_teks_laporan_lengkap_semua_cawangan():
         else:
             report_text += " • Tiada rekod kehadiran anak hari ini.\n"
 
-        # --- 2. REKOD STAFF ---
+        # 2. Rekod Staff
         report_text += "\n👤 **Kehadiran Staff:**\n"
         staff_data = daily_logs[branch]["staff"]
         if staff_data:
@@ -105,16 +108,14 @@ def jana_teks_laporan_lengkap_semua_cawangan():
 
     return report_text
 
-# Hantar laporan 11:00 malam untuk KESEMUA cawangan HANYA kepada Owner
 def hantar_laporan_malam_owner():
     report_text = jana_teks_laporan_lengkap_semua_cawangan()
     try:
         bot.send_message(TELEGRAM_CHAT_ID, report_text, parse_mode="Markdown")
-        print("Laporan gabungan semua cawangan 11:00 malam berjaya dihantar kepada Owner.")
+        print("Laporan gabungan jam 11:00 malam berjaya dihantar kepada Owner.")
     except Exception as e:
         print(f"Gagal menghantar laporan automatik kepada Owner: {e}")
 
-# Aktifkan Scheduler (Isnin - Jumaat jam 11:00 malam)
 scheduler = BackgroundScheduler(timezone="Asia/Kuala_Lumpur")
 scheduler.add_job(
     hantar_laporan_malam_owner,
@@ -126,7 +127,7 @@ scheduler.add_job(
 scheduler.start()
 
 
-# --- KEYBOARD MENUS (STAFF VS OWNER) ---
+# --- KEYBOARD MENUS ---
 def get_main_branch_menu():
     markup = ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
     markup.add(
@@ -138,7 +139,6 @@ def get_main_branch_menu():
     )
     return markup
 
-# Menu Staff: Hanya Check-In/Out Anak & Clock-In/Out Staff
 def get_staff_sub_menu():
     markup = ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
     markup.add(
@@ -151,7 +151,6 @@ def get_staff_sub_menu():
     )
     return markup
 
-# Menu Owner: Pengawasan, Yuran, Pendaftaran, dan Laporan Gabungan
 def get_owner_sub_menu():
     markup = ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
     markup.add(
@@ -218,7 +217,7 @@ def handle_branch_selection(message):
         reply_markup=menu_dipilih,
     )
 
-# --- HANDLER CHECK-IN/OUT (KHAS STAFF) ---
+# --- HANDLER CHECK-IN/OUT ---
 @bot.message_handler(func=lambda message: message.text and "Check-In Anak" in message.text)
 def handle_check_in_anak(message):
     branch = user_branches.get(message.chat.id, "Taska 1")
@@ -384,7 +383,19 @@ def handle_pendaftaran_baru(message):
         InlineKeyboardButton("🏠 Taska 2", callback_data="reg_branch_Taska 2"),
         InlineKeyboardButton("🏠 Taska 3", callback_data="reg_branch_Taska 3")
     )
-    bot.reply_to(message, "📝 Menu Pendaftaran Baru Anak-Anak", reply_markup=markup)
+    bot.reply_to(message, "📝 **Menu Pendaftaran Baru Anak-Anak**\n\nSila pilih cawangan taska:", parse_mode="Markdown", reply_markup=markup)
+
+# CALLBACK: Langkah 1 Pendaftaran (Pilih Cawangan -> Minta Nama Anak)
+@bot.callback_query_handler(func=lambda call: call.data.startswith("reg_branch_"))
+def callback_reg_branch(call):
+    branch = call.data.replace("reg_branch_", "")
+    user_states[call.message.chat.id] = {"action": "reg_step_name", "branch": branch}
+    bot.edit_message_text(
+        chat_id=call.message.chat.id,
+        message_id=call.message.message_id,
+        text=f"📝 **[{branch}] Pendaftaran Baru**\n\nSila taip **Nama Anak** di bawah:",
+        parse_mode="Markdown"
+    )
 
 @bot.message_handler(func=lambda message: message.text and "Keluarkan Dari Senarai" in message.text)
 def handle_keluarkan_senarai(message):
@@ -408,7 +419,6 @@ def handle_status_yuran(message):
     )
     bot.reply_to(message, "💳 Menu Status & Bayaran Yuran", reply_markup=markup)
 
-# Menu Laporan Manual HANYA Boleh Diakses Oleh Owner (Menyediakan ringkasan semua cawangan)
 @bot.message_handler(func=lambda message: message.text and "Laporan" in message.text)
 def handle_laporan_manual(message):
     if not semak_owner(message): return
@@ -416,39 +426,83 @@ def handle_laporan_manual(message):
     bot.reply_to(message, report_text, parse_mode="Markdown", reply_markup=get_owner_sub_menu())
 
 
-# --- HANDLER INPUT TEKS ---
+# --- HANDLER ALIRAN PENDAFTARAN & INPUT TEKS ---
 @bot.message_handler(func=lambda message: True)
 def handle_all_text_inputs(message):
     chat_id = message.chat.id
     text = message.text.strip()
     
-    if chat_id in user_states and user_states[chat_id].get("action") == "input_payment":
-        state = user_states.pop(chat_id)
-        try:
-            amount = float(text)
-            data = get_kid_fee_data(state["branch"], state["kid_name"])
-            data["dibayar"] += amount
-            bot.reply_to(message, f"💵 Bayaran RM {amount:.2f} untuk **{state['kid_name']}** berjaya dikemaskini!", parse_mode="Markdown", reply_markup=get_owner_sub_menu())
-        except ValueError:
-            bot.reply_to(message, "⚠️ Sila masukkan nombor yang sah.")
-        return
+    # --- ALIRAN PENDAFTARAN 4 LANGKAH ---
+    if chat_id in user_states:
+        action = user_states[chat_id].get("action")
+        
+        # LANGKAH 1 -> Simpan Nama Anak, Minta Nama Penjaga
+        if action == "reg_step_name":
+            user_states[chat_id]["kid_name"] = text
+            user_states[chat_id]["action"] = "reg_step_parent"
+            bot.reply_to(message, f"👤 **Nama Anak:** {text}\n\nSila taip **Nama Penjaga** di bawah:", parse_mode="Markdown")
+            return
 
-    if chat_id in user_states and user_states[chat_id].get("action") == "input_register_name":
-        user_states[chat_id]["kid_name"] = text
-        user_states[chat_id]["action"] = "input_register_fee"
-        bot.reply_to(message, f"📝 Nama: {text}\nSila taip **Jumlah Yuran (RM)**:", parse_mode="Markdown")
-        return
+        # LANGKAH 2 -> Simpan Nama Penjaga, Minta No. HP
+        if action == "reg_step_parent":
+            user_states[chat_id]["parent_name"] = text
+            user_states[chat_id]["action"] = "reg_step_phone"
+            bot.reply_to(message, f"📞 **Nama Penjaga:** {text}\n\nSila taip **No. HP Penjaga** (Contoh: 0123456789):", parse_mode="Markdown")
+            return
 
-    if chat_id in user_states and user_states[chat_id].get("action") == "input_register_fee":
-        state = user_states.pop(chat_id)
-        try:
-            fee_amount = float(text)
-            if state["kid_name"] not in KIDS_LIST: KIDS_LIST.append(state["kid_name"])
-            kids_fees.setdefault(state["branch"], {})[state["kid_name"]] = {"perlu": fee_amount, "dibayar": 0.0}
-            bot.reply_to(message, f"✅ Berjaya daftar **{state['kid_name']}** dengan yuran RM {fee_amount:.2f}!", parse_mode="Markdown", reply_markup=get_owner_sub_menu())
-        except ValueError:
-            bot.reply_to(message, "⚠️ Sila masukkan nombor yuran yang sah.")
-        return
+        # LANGKAH 3 -> Simpan No. HP, Minta Yuran Bulanan
+        if action == "reg_step_phone":
+            user_states[chat_id]["phone_no"] = text
+            user_states[chat_id]["action"] = "reg_step_fee"
+            bot.reply_to(message, f"💵 **No. HP:** {text}\n\nSila taip **Yuran Bulanan (RM)** (Contoh: 300 atau 350):", parse_mode="Markdown")
+            return
+
+        # LANGKAH 4 -> Simpan Yuran, Selesai Pendaftaran!
+        if action == "reg_step_fee":
+            state = user_states.pop(chat_id)
+            branch = state["branch"]
+            kid_name = state["kid_name"]
+            parent_name = state["parent_name"]
+            phone_no = state["phone_no"]
+            
+            try:
+                fee_amount = float(text)
+                if kid_name not in KIDS_LIST:
+                    KIDS_LIST.append(kid_name)
+                    
+                kids_fees.setdefault(branch, {})[kid_name] = {
+                    "parent": parent_name,
+                    "phone": phone_no,
+                    "perlu": fee_amount,
+                    "dibayar": 0.0
+                }
+                
+                bot.reply_to(
+                    message,
+                    f"✅ **[{branch}] Pendaftaran Anak Baru Berjaya!**\n\n"
+                    f"👶 **Nama Anak:** {kid_name}\n"
+                    f"👤 **Nama Penjaga:** {parent_name}\n"
+                    f"📞 **No. HP:** {phone_no}\n"
+                    f"💳 **Yuran Bulanan:** RM {fee_amount:.2f}\n"
+                    f" Status Yuran: ❌ *Belum Lunas*",
+                    parse_mode="Markdown",
+                    reply_markup=get_owner_sub_menu()
+                )
+            except ValueError:
+                bot.reply_to(message, "⚠️ Sila masukkan nombor jumlah yuran yang sah (Contoh: 300).")
+            return
+
+        # --- ALIRAN KEMASKINI BAYARAN MANUAL ---
+        if action == "input_payment":
+            state = user_states.pop(chat_id)
+            try:
+                amount = float(text)
+                data = get_kid_fee_data(state["branch"], state["kid_name"])
+                data["dibayar"] += amount
+                bot.reply_to(message, f"💵 Bayaran RM {amount:.2f} untuk **{state['kid_name']}** berjaya dikemaskini!", parse_mode="Markdown", reply_markup=get_owner_sub_menu())
+            except ValueError:
+                bot.reply_to(message, "⚠️ Sila masukkan nombor yang sah.")
+            return
 
     menu_aktif = get_owner_sub_menu() if str(chat_id) in OWNER_IDS else get_staff_sub_menu()
     bot.reply_to(message, "Sila gunakan butang menu di bawah:", reply_markup=menu_aktif)
