@@ -26,11 +26,11 @@ app = Flask(__name__)
 # Zon Masa Malaysia (UTC+8)
 MY_TZ = timezone(timedelta(hours=8))
 
-# Senarai Data Asas (Boleh disesuaikan atau diambil dari DB)
+# Senarai Data Asas
 STAFF_LIST = ["Siti Maryam", "Adam Harith"]
 KIDS_LIST = ["Ahmad", "Aisha", "Rayyan"]
 
-# Simpanan Sesi Cawangan yang dipilih mengikut pengguna (Chat ID)
+# Simpanan Sesi Cawangan mengikut pengguna (Chat ID)
 user_branches = {}
 
 
@@ -108,6 +108,7 @@ def get_sub_menu(branch_name):
         KeyboardButton("📊 Laporan")
     )
     markup.add(
+        KeyboardButton("❌ Keluarkan Dari Senarai"),
         KeyboardButton("🔙 Tukar Cawangan")
     )
     return markup
@@ -181,7 +182,6 @@ def handle_check_in_anak(message):
     checked_in_today = []
 
     if not df.empty and "Tarikh" in df.columns:
-        # Tapis mengikut tarikh dan cawangan jika ada ruangan Cawangan
         filtered = df[
             (df["Tarikh"].astype(str) == today_str) & (df["Aktiviti"] == "Check-In")
         ]
@@ -312,17 +312,41 @@ def handle_ot_staff(message):
     )
 
 
-# Handler Pendaftaran Baru Anak-Anak
+# Handler Pendaftaran Baru Anak-Anak (Papar 3 Pilihan Cawangan)
 @bot.message_handler(
     func=lambda message: message.text and "Pendaftaran Baru Anak-Anak" in message.text
 )
 def handle_pendaftaran_baru(message):
-    chat_id = message.chat.id
-    branch = user_branches.get(chat_id, "Taska 1")
+    markup = InlineKeyboardMarkup()
+    markup.add(
+        InlineKeyboardButton("🏠 Taska 1", callback_data="reg_branch_Taska 1"),
+        InlineKeyboardButton("🏠 Taska 2", callback_data="reg_branch_Taska 2"),
+        InlineKeyboardButton("🏠 Taska 3", callback_data="reg_branch_Taska 3")
+    )
     bot.reply_to(
         message,
-        f"📝 **[{branch}] Borang Pendaftaran Anak Baru**\n\nSila hantar maklumat anak mengikut format berikut:\n\n*Nama Anak:*\n*Nama Penjaga:*\n*No. Telefon:*",
-        parse_mode="Markdown"
+        "📝 **Menu Pendaftaran Baru Anak-Anak**\n\nSila pilih cawangan taska untuk pendaftaran:",
+        parse_mode="Markdown",
+        reply_markup=markup
+    )
+
+
+# Handler Keluarkan Dari Senarai (Papar 3 Pilihan Cawangan)
+@bot.message_handler(
+    func=lambda message: message.text and "Keluarkan Dari Senarai" in message.text
+)
+def handle_keluarkan_senarai(message):
+    markup = InlineKeyboardMarkup()
+    markup.add(
+        InlineKeyboardButton("🏠 Taska 1", callback_data="rem_branch_Taska 1"),
+        InlineKeyboardButton("🏠 Taska 2", callback_data="rem_branch_Taska 2"),
+        InlineKeyboardButton("🏠 Taska 3", callback_data="rem_branch_Taska 3")
+    )
+    bot.reply_to(
+        message,
+        "❌ **Menu Keluarkan Dari Senarai**\n\nSila pilih cawangan taska:",
+        parse_mode="Markdown",
+        reply_markup=markup
     )
 
 
@@ -437,6 +461,105 @@ def callback_clockout_staff(call):
         chat_id=call.message.chat.id,
         message_id=call.message.message_id,
         text=f"🔴 [{branch}] {staff_name} telah berjaya Clock-Out dan direkodkan ke Google Sheets!",
+    )
+
+
+# Callback: Selepas pilih cawangan untuk Pendaftaran Baru
+@bot.callback_query_handler(func=lambda call: call.data.startswith("reg_branch_"))
+def callback_reg_branch(call):
+    branch = call.data.replace("reg_branch_", "")
+    bot.edit_message_text(
+        chat_id=call.message.chat.id,
+        message_id=call.message.message_id,
+        text=f"📝 **[{branch}] Borang Pendaftaran Anak Baru**\n\nSila hantar maklumat anak mengikut format berikut:\n\n*Nama Anak:*\n*Nama Penjaga:*\n*No. Telefon:*",
+        parse_mode="Markdown"
+    )
+
+
+# Callback: Selepas pilih cawangan untuk Keluarkan Dari Senarai
+@bot.callback_query_handler(func=lambda call: call.data.startswith("rem_branch_"))
+def callback_rem_branch(call):
+    branch = call.data.replace("rem_branch_", "")
+    
+    markup = InlineKeyboardMarkup()
+    markup.add(
+        InlineKeyboardButton("👶 Keluarkan Nama Anak", callback_data=f"rem_type_kid_{branch}"),
+        InlineKeyboardButton("👤 Keluarkan Nama Staff", callback_data=f"rem_type_staff_{branch}")
+    )
+    bot.edit_message_text(
+        chat_id=call.message.chat.id,
+        message_id=call.message.message_id,
+        text=f"❌ **[{branch}]**\nSila pilih kategori yang ingin dikeluarkan:",
+        parse_mode="Markdown",
+        reply_markup=markup
+    )
+
+
+# Callback: Pilih Senarai Anak Mengikut Cawangan
+@bot.callback_query_handler(func=lambda call: call.data.startswith("rem_type_kid_"))
+def callback_rem_type_kid(call):
+    branch = call.data.replace("rem_type_kid_", "")
+    
+    markup = InlineKeyboardMarkup()
+    for name in KIDS_LIST:
+        markup.add(
+            InlineKeyboardButton(f"❌ {name}", callback_data=f"remove_kid_{branch}_{name}")
+        )
+    bot.edit_message_text(
+        chat_id=call.message.chat.id,
+        message_id=call.message.message_id,
+        text=f"[{branch}] Sila pilih nama anak untuk dikeluarkan:",
+        reply_markup=markup
+    )
+
+
+# Callback: Pilih Senarai Staff Mengikut Cawangan
+@bot.callback_query_handler(func=lambda call: call.data.startswith("rem_type_staff_"))
+def callback_rem_type_staff(call):
+    branch = call.data.replace("rem_type_staff_", "")
+    
+    markup = InlineKeyboardMarkup()
+    for name in STAFF_LIST:
+        markup.add(
+            InlineKeyboardButton(f"❌ {name}", callback_data=f"remove_staff_{branch}_{name}")
+        )
+    bot.edit_message_text(
+        chat_id=call.message.chat.id,
+        message_id=call.message.message_id,
+        text=f"[{branch}] Sila pilih nama staff untuk dikeluarkan:",
+        reply_markup=markup
+    )
+
+
+# Callback: Tindakan Eksekusi Buang Anak
+@bot.callback_query_handler(func=lambda call: call.data.startswith("remove_kid_"))
+def callback_remove_kid_action(call):
+    parts = call.data.replace("remove_kid_", "").split("_", 1)
+    branch = parts[0]
+    kid_name = parts[1]
+    
+    save_to_sheet(kid_name, "Anak", "Keluarkan Dari Senarai", branch)
+    bot.answer_callback_query(call.id, f"{kid_name} telah dikeluarkan!")
+    bot.edit_message_text(
+        chat_id=call.message.chat.id,
+        message_id=call.message.message_id,
+        text=f"❌ [{branch}] {kid_name} telah berjaya dikeluarkan dari senarai dan direkodkan.",
+    )
+
+
+# Callback: Tindakan Eksekusi Buang Staff
+@bot.callback_query_handler(func=lambda call: call.data.startswith("remove_staff_"))
+def callback_remove_staff_action(call):
+    parts = call.data.replace("remove_staff_", "").split("_", 1)
+    branch = parts[0]
+    staff_name = parts[1]
+    
+    save_to_sheet(staff_name, "Staff", "Keluarkan Dari Senarai", branch)
+    bot.answer_callback_query(call.id, f"{staff_name} telah dikeluarkan!")
+    bot.edit_message_text(
+        chat_id=call.message.chat.id,
+        message_id=call.message.message_id,
+        text=f"❌ [{branch}] {staff_name} telah berjaya dikeluarkan dari senarai dan direkodkan.",
     )
 
 
