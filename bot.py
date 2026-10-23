@@ -3,7 +3,7 @@ import telebot
 from apscheduler.schedulers.background import BackgroundScheduler
 
 # Token Bot Telegram anda (dalam satu baris penuh)
-TOKEN = "8675996323:AAFKUOUsZaVCpauQnAN7So1TRrjmbv_VLTI"
+TOKEN = "8675996323:AAFFlD67gt2HXet63MKEo08iJYm8ojVcol0"
 bot = telebot.TeleBot(TOKEN)
 
 # ==========================================
