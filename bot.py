@@ -1,13 +1,31 @@
 import os
+import threading
+import http.server
+import socketserver
 import telebot
 from apscheduler.schedulers.background import BackgroundScheduler
 
-# Token Bot Telegram anda (dalam satu baris penuh)
+# 1. Tetapan Pelayan Web Mini untuk Render (Supaya ralat 'No open ports' hilang)
+PORT = int(os.environ.get('PORT', 10000))
+
+def run_dummy_server():
+    Handler = http.server.SimpleHTTPRequestHandler
+    with socketserver.TCPServer(("", PORT), Handler) as httpd:
+        print(f"Pelayan web dummy aktif pada port {PORT}")
+        httpd.serve_forever()
+
+# Jalankan pelayan web dalam background thread
+server_thread = threading.Thread(target=run_dummy_server, daemon=True)
+server_thread.start()
+
+
+# 2. Token Bot Telegram anda yang baharu
 TOKEN = "8675996323:AAFFlD67gt2HXet63MKEo08iJYm8ojVcol0"
 bot = telebot.TeleBot(TOKEN)
 
+
 # ==========================================
-# 1. FUNGSI PENJADUALAN AUTOMATIK (11:00 MALAM)
+# 3. FUNGSI PENJADUALAN AUTOMATIK (11:00 MALAM)
 # ==========================================
 def hantar_laporan_malam():
     chat_id = "8353544393"  # Gantikan dengan Chat ID Telegram anda (cth: "123456789")
@@ -38,7 +56,7 @@ scheduler.start()
 
 
 # ==========================================
-# 2. COMMAND & HANDLER PENGURUSAN TASKA
+# 4. COMMAND & HANDLER PENGURUSAN TASKA
 # ==========================================
 
 @bot.message_handler(commands=['start'])
@@ -58,7 +76,6 @@ def send_welcome(message):
     )
     bot.reply_to(message, welcome_text, parse_mode="Markdown")
 
-# Fungsi Check-In / Check-Out Kanak-kanak
 @bot.message_handler(commands=['checkin_anak'])
 def handle_checkin_anak(message):
     bot.reply_to(message, "👶 Sila hantar nama kanak-kanak untuk *Check-In*.", parse_mode="Markdown")
@@ -67,7 +84,6 @@ def handle_checkin_anak(message):
 def handle_checkout_anak(message):
     bot.reply_to(message, "👶 Sila hantar nama kanak-kanak untuk *Check-Out*.", parse_mode="Markdown")
 
-# Fungsi Clock-In / Clock-Out Staff
 @bot.message_handler(commands=['clockin_staff'])
 def handle_clockin_staff(message):
     bot.reply_to(message, "👩‍💼 Sila hantar nama staff untuk *Clock-In* (Masuk Kerja).", parse_mode="Markdown")
@@ -76,7 +92,6 @@ def handle_clockin_staff(message):
 def handle_clockout_staff(message):
     bot.reply_to(message, "👩‍💼 Sila hantar nama staff untuk *Clock-Out* (Tamat Kerja).", parse_mode="Markdown")
 
-# Fungsi Yuran & Laporan
 @bot.message_handler(commands=['yuran'])
 def handle_yuran(message):
     bot.reply_to(message, "💰 Semakan status yuran bulanan sedang diproses...", parse_mode="Markdown")
@@ -87,7 +102,7 @@ def handle_laporan_manual(message):
 
 
 # ==========================================
-# 3. RUNNER UTAMA BOT
+# 5. RUNNER UTAMA BOT
 # ==========================================
 if __name__ == "__main__":
     print("Bot Taska sedang berjalan...")
