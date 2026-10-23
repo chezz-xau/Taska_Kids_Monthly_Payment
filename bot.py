@@ -10,7 +10,7 @@ bot = telebot.TeleBot(TOKEN)
 # 2. FUNGSI PENJADUALAN AUTOMATIK (11:00 MALAM)
 # ==========================================
 def hantar_laporan_malam():
-    chat_id = "MASUKKAN_CHAT_ID_ANDA"  # Gantikan dengan Chat ID anda atau Group Admin
+    chat_id = "8353544393"  # Gantikan dengan Chat ID anda atau Group Admin
     
     teks_laporan = (
         "📊 *Laporan Harian Taska (Automatik)*\n\n"
