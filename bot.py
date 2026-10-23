@@ -17,7 +17,7 @@ TELEGRAM_TOKEN = "8675996323:AAFFlD67gt2HXet63MKEo08iJYm8ojVcol0"  # Token Bot a
 TELEGRAM_CHAT_ID = "8353544393"                       # Chat ID Owner (untuk laporan 11 malam)
 
 # Senarai ID Telegram Owner & Staff
-OWNER_IDS = ["123456789"]               # Masukkan Chat ID Owner
+OWNER_IDS = ["8353544393"]               # Masukkan Chat ID Owner
 STAFF_IDS = ["111222333", "444555666"]      # Masukkan Chat ID Staff
 # ==========================================
 
