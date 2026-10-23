@@ -13,7 +13,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 # ==========================================
 # ⚙️ TETAPAN UTAMA & KAWALAN AKSES (ROLES)
 # ==========================================
-TELEGRAM_TOKEN = "8675996323:8675996323:AAFFlD67gt2HXet63MKEo08iJYm8ojVcol0"  # Token Bot Anda
+TELEGRAM_TOKEN = "8675996323:AAFFlD67gt2HXet63MKEo08iJYm8ojVcol0"  # Token Bot Anda
 TELEGRAM_CHAT_ID = "8353544393"                       # Chat ID Owner (Laporan 11 malam dihantar ke sini)
 
 # Senarai ID Telegram Owner & Staff
