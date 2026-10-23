@@ -406,7 +406,7 @@ def handle_keluarkan_senarai(message):
     )
     bot.reply_to(message, "❌ Menu Keluarkan Dari Senarai", reply_markup=markup)
 
-# --- MENU STATUS & BAYARAN YURAN TERKEMASKINI ---
+# --- MENU STATUS & BAYARAN YURAN ---
 @bot.message_handler(func=lambda message: message.text and "Status & Bayaran Yuran" in message.text)
 def handle_status_yuran(message):
     if not semak_owner(message): return
@@ -434,7 +434,6 @@ def callback_fee_branch(call):
         reply_markup=markup
     )
 
-# --- PAPARAN YURAN DENGAN STATUS TERPERINCI ---
 @bot.callback_query_handler(func=lambda call: call.data.startswith("fee_check_"))
 def callback_fee_check(call):
     branch = call.data.replace("fee_check_", "")
@@ -470,6 +469,7 @@ def callback_fee_check(call):
         parse_mode="Markdown"
     )
 
+# --- PENAMBAHBAIKAN FORMAT CALLBACK UNTUK NAMA PANJANG ---
 @bot.callback_query_handler(func=lambda call: call.data.startswith("fee_update_"))
 def callback_fee_update(call):
     branch = call.data.replace("fee_update_", "")
@@ -478,8 +478,9 @@ def callback_fee_update(call):
     
     if branch_kids:
         for name in branch_kids:
+            # Gunakan simbol '|' sebagai pemisah
             markup.add(
-                InlineKeyboardButton(f"💵 Bayar: {name}", callback_data=f"input_pay_{branch}_{name}")
+                InlineKeyboardButton(f"💵 Bayar: {name}", callback_data=f"pay|{branch}|{name}")
             )
         bot.answer_callback_query(call.id, "Sila pilih nama anak.")
         bot.edit_message_text(
@@ -497,6 +498,22 @@ def callback_fee_update(call):
             text=f"💳 **[{branch}]** Tiada rekod pendaftaran anak lagi.",
             parse_mode="Markdown"
         )
+
+# Callback Input Bayaran yang menyokong nama dengan ruang kosong (cth: Ali Bin Ahmad)
+@bot.callback_query_handler(func=lambda call: call.data.startswith("pay|"))
+def callback_input_pay(call):
+    parts = call.data.split("|")
+    branch = parts[1]
+    kid_name = parts[2]
+    chat_id = call.message.chat.id
+    
+    user_states[chat_id] = {"action": "input_payment", "branch": branch, "kid_name": kid_name}
+    bot.answer_callback_query(call.id, f"Sila taip bayaran untuk {kid_name}")
+    bot.send_message(
+        chat_id=chat_id,
+        text=f"💵 Sila taip **jumlah bayaran (RM)** yang dibuat untuk **{kid_name}** di bawah:\n*(Contoh: 150 atau 300)*",
+        parse_mode="Markdown"
+    )
 
 @bot.message_handler(func=lambda message: message.text and "Laporan" in message.text)
 def handle_laporan_manual(message):
@@ -567,7 +584,7 @@ def handle_all_text_inputs(message):
                 bot.reply_to(message, "⚠️ Sila masukkan nombor jumlah yuran yang sah (Contoh: 300).")
             return
 
-        # ALIRAN BAYARAN MANUAL TERKEMASKINI
+        # ALIRAN BAYARAN MANUAL
         if action == "input_payment":
             state = user_states.pop(chat_id)
             branch = state["branch"]
