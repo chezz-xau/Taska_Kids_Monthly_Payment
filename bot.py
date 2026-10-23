@@ -11,10 +11,14 @@ from telebot.types import (
 from apscheduler.schedulers.background import BackgroundScheduler
 
 # ==========================================
-# ⚙️ TETAPAN UTAMA: MASUKKAN TOKEN & CHAT ID ANDA DI SINI
+# ⚙️ TETAPAN UTAMA & KAWALAN AKSES (ROLES)
 # ==========================================
 TELEGRAM_TOKEN = "8675996323:AAFFlD67gt2HXet63MKEo08iJYm8ojVcol0"  # Token Bot anda
-TELEGRAM_CHAT_ID = "8353544393"                       # Tukar kepada Chat ID Telegram anda (cth: "123456789")
+TELEGRAM_CHAT_ID = "8353544393"                       # Chat ID Owner (untuk laporan 11 malam)
+
+# Senarai ID Telegram Owner & Staff
+OWNER_IDS = ["123456789"]               # Masukkan Chat ID Owner
+STAFF_IDS = ["111222333", "444555666"]      # Masukkan Chat ID Staff
 # ==========================================
 
 if not TELEGRAM_TOKEN:
@@ -29,14 +33,24 @@ MY_TZ = timezone(timedelta(hours=8))
 # Senarai Data Asas
 STAFF_LIST = ["Siti Maryam", "Adam Harith"]
 KIDS_LIST = ["Ahmad", "Aisha", "Rayyan"]
+BRANCHES = ["Taska 1", "Taska 2", "Taska 3"]
 
-# Simpanan Sesi & Status Kehadiran Beserta Waktu
+# Simpanan Sesi & Status Kehadiran Semasa
 user_branches = {}
-user_states = {}          # Untuk menguruskan langkah menaip mesej (State management)
+user_states = {}
 active_checkins = {}      # Format: {"Taska 1": {"Ahmad": "08:15 AM"}}
 active_staff_clockin = {} # Format: {"Taska 1": {"Siti Maryam": "07:45 AM"}}
 
-# Rekod Pengurusan Yuran Terperinci
+# 📜 REKOD SEJARAH HARIAN (DAILY HISTORY LOGS)
+# Disimpan sepanjang hari untuk dijana pada laporan 11:00 malam
+daily_logs = {
+    branch: {
+        "kids": {},   # Format: {"Ahmad": {"in": "08:15 AM", "out": "06:30 PM", "late": True}}
+        "staff": {}   # Format: {"Siti Maryam": {"in": "07:45 AM", "out": "07:00 PM", "ot": True}}
+    } for branch in BRANCHES
+}
+
+# Rekod Pengurusan Yuran
 kids_fees = {
     "Taska 1": {
         "Ahmad": {"perlu": 300.0, "dibayar": 0.0},
@@ -46,7 +60,6 @@ kids_fees = {
 }
 
 def get_kid_fee_data(branch, kid_name):
-    """Fungsi pembantu mengambil atau mendaftar rekod yuran anak"""
     if branch not in kids_fees:
         kids_fees[branch] = {}
     if kid_name not in kids_fees[branch]:
@@ -55,30 +68,46 @@ def get_kid_fee_data(branch, kid_name):
 
 
 # ==========================================
-# FUNGSI PENJADUALAN AUTOMATIK (11:00 MALAM)
+# 📊 FUNGSI JANA LAPORAN LENGKAP (SEMUA TASKA)
 # ==========================================
-def hantar_laporan_malam():
-    branch = "Taska 1"
+def jana_teks_laporan_lengkap():
     today_str = datetime.now(MY_TZ).strftime("%Y-%m-%d")
-    
-    checked_in_kids = active_checkins.get(branch, {})
-    clocked_staff = active_staff_clockin.get(branch, {})
+    report_text = f"📊 **LAPORAN HARIAN TASKA (PENUH)**\n📅 *Tarikh: {today_str}*\n"
+    report_text += "=============================\n\n"
 
-    report_text = f"📊 **Laporan Automatik 11:00 Malam - [{branch}] ({today_str})**\n\n"
-    report_text += f"👶 **Anak Sedang Check-In:**\n"
-    if checked_in_kids:
-        for name, time_str in checked_in_kids.items():
-            report_text += f"• **{name}** — Check-In pada *{time_str}*\n"
-    else:
-        report_text += "• Tiada\n"
+    for branch in BRANCHES:
+        report_text += f"🏠 **[{branch.upper()}]**\n"
         
-    report_text += f"\n👤 **Staff Hadir (Clock-In):**\n"
-    if clocked_staff:
-        for name, time_str in clocked_staff.items():
-            report_text += f"• **{name}** — Clock-In pada *{time_str}*\n"
-    else:
-        report_text += "• Tiada\n"
+        # --- 1. REKOD KANAK-KANAK ---
+        report_text += "👶 **Kehadiran Kanak-Kanak:**\n"
+        kids_data = daily_logs[branch]["kids"]
+        if kids_data:
+            for k_name, times in kids_data.items():
+                t_in = times.get("in", "Tiada Record")
+                t_out = times.get("out", "Belum Check-Out")
+                late_tag = " ⚠️ *(LATE PICK UP)*" if times.get("late") else ""
+                report_text += f" • **{k_name}**: In {t_in} | Out {t_out}{late_tag}\n"
+        else:
+            report_text += " • Tiada rekod kehadiran anak hari ini.\n"
 
+        # --- 2. REKOD STAFF ---
+        report_text += "\n👤 **Kehadiran Staff:**\n"
+        staff_data = daily_logs[branch]["staff"]
+        if staff_data:
+            for s_name, times in staff_data.items():
+                t_in = times.get("in", "Tiada Record")
+                t_out = times.get("out", "Belum Clock-Out")
+                ot_tag = " ⏳ *(OVERTIME / OT)*" if times.get("ot") else ""
+                report_text += f" • **{s_name}**: In {t_in} | Out {t_out}{ot_tag}\n"
+        else:
+            report_text += " • Tiada rekod kehadiran staff hari ini.\n"
+
+        report_text += "\n-----------------------------\n"
+
+    return report_text
+
+def hantar_laporan_malam():
+    report_text = jana_teks_laporan_lengkap()
     try:
         bot.send_message(TELEGRAM_CHAT_ID, report_text, parse_mode="Markdown")
         print("Laporan malam berjaya dihantar secara automatik.")
@@ -109,7 +138,19 @@ def get_main_branch_menu():
     )
     return markup
 
-def get_sub_menu(branch_name):
+def get_staff_sub_menu():
+    markup = ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
+    markup.add(
+        KeyboardButton("📥 Check-In Anak"),
+        KeyboardButton("📤 Check-Out Anak")
+    )
+    markup.add(
+        KeyboardButton("🟢 Clock-In Staff"),
+        KeyboardButton("🔴 Clock-Out Staff")
+    )
+    return markup
+
+def get_owner_sub_menu():
     markup = ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
     markup.add(
         KeyboardButton("📥 Check-In Anak"),
@@ -163,19 +204,26 @@ def send_welcome(message):
         reply_markup=get_main_branch_menu(),
     )
 
-# Handler Pemilihan Cawangan
 @bot.message_handler(
     func=lambda message: message.text in ["🏠 Taska 1", "🏠 Taska 2", "🏠 Taska 3"]
 )
 def handle_branch_selection(message):
-    chat_id = message.chat.id
+    chat_id = str(message.chat.id)
     branch = message.text.replace("🏠 ", "")
-    user_branches[chat_id] = branch
+    user_branches[int(message.chat.id)] = branch
+    
+    if chat_id in OWNER_IDS:
+        menu_dipilih = get_owner_sub_menu()
+        role_teks = "Owner"
+    else:
+        menu_dipilih = get_staff_sub_menu()
+        role_teks = "Staff"
+
     bot.reply_to(
         message,
-        f"Anda telah memilih *{branch}*.\nSila pilih menu tindakan di bawah:",
+        f"Anda telah memilih *{branch}* (Status: {role_teks}).\nSila pilih menu tindakan di bawah:",
         parse_mode="Markdown",
-        reply_markup=get_sub_menu(branch),
+        reply_markup=menu_dipilih,
     )
 
 # Handler Check-In Anak
@@ -183,242 +231,87 @@ def handle_branch_selection(message):
     func=lambda message: message.text and "Check-In Anak" in message.text
 )
 def handle_check_in_anak(message):
-    chat_id = message.chat.id
-    branch = user_branches.get(chat_id, "Taska 1")
+    branch = user_branches.get(message.chat.id, "Taska 1")
     checked_in_today = active_checkins.get(branch, {})
     
     markup = InlineKeyboardMarkup()
     for name in KIDS_LIST:
         if name in checked_in_today:
             time_str = checked_in_today[name]
-            markup.add(
-                InlineKeyboardButton(
-                    f"🔴 {name} (Sudah Check-In: {time_str})", callback_data=f"ignore_{name}"
-                )
-            )
+            markup.add(InlineKeyboardButton(f"🔴 {name} (Sudah Check-In: {time_str})", callback_data=f"ignore_{name}"))
         else:
-            markup.add(
-                InlineKeyboardButton(
-                    f"📥 {name} (Check-In)", callback_data=f"checkin_kid_{name}"
-                )
-            )
+            markup.add(InlineKeyboardButton(f"📥 {name} (Check-In)", callback_data=f"checkin_kid_{name}"))
 
-    bot.reply_to(
-        message, f"[{branch}]\nSila pilih nama anak untuk Check-In:", reply_markup=markup
-    )
+    bot.reply_to(message, f"[{branch}]\nSila pilih nama anak untuk Check-In:", reply_markup=markup)
 
 # Handler Check-Out Anak
 @bot.message_handler(
     func=lambda message: message.text and "Check-Out Anak" in message.text
 )
 def handle_check_out_anak(message):
-    chat_id = message.chat.id
-    branch = user_branches.get(chat_id, "Taska 1")
+    branch = user_branches.get(message.chat.id, "Taska 1")
     checked_in_today = active_checkins.get(branch, {})
     
     markup = InlineKeyboardMarkup()
     for name in KIDS_LIST:
         if name in checked_in_today:
             time_str = checked_in_today[name]
-            markup.add(
-                InlineKeyboardButton(
-                    f"📤 {name} (Check-In jam {time_str})", callback_data=f"checkout_kid_{name}"
-                )
-            )
+            markup.add(InlineKeyboardButton(f"📤 {name} (Check-In jam {time_str})", callback_data=f"checkout_kid_{name}"))
         else:
-            markup.add(
-                InlineKeyboardButton(
-                    f"⚪ {name} (Belum Check-In)", callback_data=f"ignore_uncheck_{name}"
-                )
-            )
+            markup.add(InlineKeyboardButton(f"⚪ {name} (Belum Check-In)", callback_data=f"ignore_uncheck_{name}"))
             
-    bot.reply_to(
-        message, f"[{branch}]\nSila pilih nama anak untuk Check-Out:", reply_markup=markup
-    )
-
-# Handler Late Pick Up Charges
-@bot.message_handler(
-    func=lambda message: message.text and "Late Pick Up Charges" in message.text
-)
-def handle_late_pickup(message):
-    chat_id = message.chat.id
-    branch = user_branches.get(chat_id, "Taska 1")
-    bot.reply_to(
-        message,
-        f"⏱️ [{branch}] Semakan Caj Late Pick Up\n\nSila pilih nama anak atau semak rekod kelewatan pengambilan.",
-        parse_mode="Markdown"
-    )
+    bot.reply_to(message, f"[{branch}]\nSila pilih nama anak untuk Check-Out:", reply_markup=markup)
 
 # Handler Clock-In Staff
 @bot.message_handler(
     func=lambda message: message.text and "Clock-In Staff" in message.text
 )
 def handle_clock_in_staff(message):
-    chat_id = message.chat.id
-    branch = user_branches.get(chat_id, "Taska 1")
+    branch = user_branches.get(message.chat.id, "Taska 1")
     clocked_in_today = active_staff_clockin.get(branch, {})
     
     markup = InlineKeyboardMarkup()
     for name in STAFF_LIST:
         if name in clocked_in_today:
             time_str = clocked_in_today[name]
-            markup.add(
-                InlineKeyboardButton(
-                    f"🟢 {name} (Sudah Hadir: {time_str})", callback_data=f"ignore_{name}"
-                )
-            )
+            markup.add(InlineKeyboardButton(f"🟢 {name} (Sudah Hadir: {time_str})", callback_data=f"ignore_{name}"))
         else:
-            markup.add(
-                InlineKeyboardButton(
-                    f"🔴 {name} (Belum Hadir)", callback_data=f"clockin_staff_{name}"
-                )
-            )
+            markup.add(InlineKeyboardButton(f"🔴 {name} (Belum Hadir)", callback_data=f"clockin_staff_{name}"))
 
-    bot.reply_to(
-        message, f"[{branch}]\nSila pilih nama staff untuk Clock-In:", reply_markup=markup
-    )
+    bot.reply_to(message, f"[{branch}]\nSila pilih nama staff untuk Clock-In:", reply_markup=markup)
 
 # Handler Clock-Out Staff
 @bot.message_handler(
     func=lambda message: message.text and "Clock-Out Staff" in message.text
 )
 def handle_clock_out_staff(message):
-    chat_id = message.chat.id
-    branch = user_branches.get(chat_id, "Taska 1")
+    branch = user_branches.get(message.chat.id, "Taska 1")
     clocked_in_today = active_staff_clockin.get(branch, {})
     
     markup = InlineKeyboardMarkup()
     for name in STAFF_LIST:
         if name in clocked_in_today:
             time_str = clocked_in_today[name]
-            markup.add(
-                InlineKeyboardButton(
-                    f"🔴 {name} (Clock-In: {time_str})", callback_data=f"clockout_staff_{name}"
-                )
-            )
+            markup.add(InlineKeyboardButton(f"🔴 {name} (Clock-In: {time_str})", callback_data=f"clockout_staff_{name}"))
         else:
-            markup.add(
-                InlineKeyboardButton(
-                    f"⚪ {name} (Belum Clock-In)", callback_data=f"ignore_uncheck_{name}"
-                )
-            )
+            markup.add(InlineKeyboardButton(f"⚪ {name} (Belum Clock-In)", callback_data=f"ignore_uncheck_{name}"))
 
-    bot.reply_to(
-        message, f"[{branch}]\nSila pilih nama staff untuk Clock-Out:", reply_markup=markup
-    )
-
-# Handler OT Staff
-@bot.message_handler(
-    func=lambda message: message.text and "OT Staff" in message.text
-)
-def handle_ot_staff(message):
-    chat_id = message.chat.id
-    branch = user_branches.get(chat_id, "Taska 1")
-    bot.reply_to(
-        message,
-        f"⌛ [{branch}] Rekod Overtime (OT) Staff\n\nSila masukkan butiran jam OT staff.",
-        parse_mode="Markdown"
-    )
-
-# Handler Pendaftaran Baru Anak-Anak
-@bot.message_handler(
-    func=lambda message: message.text and "Pendaftaran Baru Anak-Anak" in message.text
-)
-def handle_pendaftaran_baru(message):
-    markup = InlineKeyboardMarkup()
-    markup.add(
-        InlineKeyboardButton("🏠 Taska 1", callback_data="reg_branch_Taska 1"),
-        InlineKeyboardButton("🏠 Taska 2", callback_data="reg_branch_Taska 2"),
-        InlineKeyboardButton("🏠 Taska 3", callback_data="reg_branch_Taska 3")
-    )
-    bot.reply_to(
-        message,
-        "📝 Menu Pendaftaran Baru Anak-Anak\n\nSila pilih cawangan taska untuk pendaftaran:",
-        parse_mode="Markdown",
-        reply_markup=markup
-    )
-
-# Handler Keluarkan Dari Senarai
-@bot.message_handler(
-    func=lambda message: message.text and "Keluarkan Dari Senarai" in message.text
-)
-def handle_keluarkan_senarai(message):
-    markup = InlineKeyboardMarkup()
-    markup.add(
-        InlineKeyboardButton("🏠 Taska 1", callback_data="rem_branch_Taska 1"),
-        InlineKeyboardButton("🏠 Taska 2", callback_data="rem_branch_Taska 2"),
-        InlineKeyboardButton("🏠 Taska 3", callback_data="rem_branch_Taska 3")
-    )
-    bot.reply_to(
-        message,
-        "❌ Menu Keluarkan Dari Senarai\n\nSila pilih cawangan taska:",
-        parse_mode="Markdown",
-        reply_markup=markup
-    )
-
-# Handler Status & Bayaran Yuran
-@bot.message_handler(
-    func=lambda message: message.text and "Status & Bayaran Yuran" in message.text
-)
-def handle_status_yuran(message):
-    markup = InlineKeyboardMarkup()
-    markup.add(
-        InlineKeyboardButton("🏠 Taska 1", callback_data="fee_branch_Taska 1"),
-        InlineKeyboardButton("🏠 Taska 2", callback_data="fee_branch_Taska 2"),
-        InlineKeyboardButton("🏠 Taska 3", callback_data="fee_branch_Taska 3")
-    )
-    bot.reply_to(
-        message,
-        "💳 Menu Status & Bayaran Yuran\n\nSila pilih cawangan taska:",
-        parse_mode="Markdown",
-        reply_markup=markup
-    )
-
-# Handler Laporan
-@bot.message_handler(
-    func=lambda message: message.text and "Laporan" in message.text
-)
-def handle_laporan(message):
-    chat_id = message.chat.id
-    branch = user_branches.get(chat_id, "Taska 1")
-    today_str = datetime.now(MY_TZ).strftime("%Y-%m-%d")
-    
-    checked_in_kids = active_checkins.get(branch, {})
-    clocked_staff = active_staff_clockin.get(branch, {})
-
-    report_text = f"📊 **Laporan Semasa - [{branch}] ({today_str})**\n\n"
-    report_text += f"👶 **Anak Sedang Check-In:**\n"
-    if checked_in_kids:
-        for name, time_str in checked_in_kids.items():
-            report_text += f"• **{name}** — Check-In pada *{time_str}*\n"
-    else:
-        report_text += "• Tiada\n"
-        
-    report_text += f"\n👤 **Staff Hadir (Clock-In):**\n"
-    if clocked_staff:
-        for name, time_str in clocked_staff.items():
-            report_text += f"• **{name}** — Clock-In pada *{time_str}*\n"
-    else:
-        report_text += "• Tiada\n"
-
-    bot.reply_to(
-        message, report_text, parse_mode="Markdown", reply_markup=get_sub_menu(branch)
-    )
+    bot.reply_to(message, f"[{branch}]\nSila pilih nama staff untuk Clock-Out:", reply_markup=markup)
 
 
-# --- CALLBACK QUERY HANDLERS ---
+# --- CALLBACK QUERY HANDLERS (SEJARAH RECORD) ---
 @bot.callback_query_handler(func=lambda call: call.data.startswith("checkin_kid_"))
 def callback_checkin_kid(call):
     chat_id = call.message.chat.id
     branch = user_branches.get(chat_id, "Taska 1")
     kid_name = call.data.replace("checkin_kid_", "")
-    now_time = datetime.now(MY_TZ).strftime("%I:%M %p")
+    now_dt = datetime.now(MY_TZ)
+    now_time = now_dt.strftime("%I:%M %p")
     
-    if branch not in active_checkins:
-        active_checkins[branch] = {}
-    active_checkins[branch][kid_name] = now_time
+    active_checkins.setdefault(branch, {})[kid_name] = now_time
+    daily_logs[branch]["kids"].setdefault(kid_name, {})["in"] = now_time
     
-    bot.answer_callback_query(call.id, f"{kid_name} telah Check-In pada {now_time}!")
+    bot.answer_callback_query(call.id, f"{kid_name} telah Check-In!")
     bot.edit_message_text(
         chat_id=call.message.chat.id,
         message_id=call.message.message_id,
@@ -431,15 +324,24 @@ def callback_checkout_kid(call):
     chat_id = call.message.chat.id
     branch = user_branches.get(chat_id, "Taska 1")
     kid_name = call.data.replace("checkout_kid_", "")
-    now_time = datetime.now(MY_TZ).strftime("%I:%M %p")
+    now_dt = datetime.now(MY_TZ)
+    now_time = now_dt.strftime("%I:%M %p")
+    
+    # Semak late pick up (Contoh: Tamat operasi jam 6:00 PM / 18:00)
+    is_late = now_dt.hour >= 18
     
     checkin_time = active_checkins.get(branch, {}).pop(kid_name, "N/A")
+    kid_log = daily_logs[branch]["kids"].setdefault(kid_name, {})
+    kid_log["out"] = now_time
+    kid_log["late"] = is_late
+
+    late_text = "\n⚠️ *(Diandaikan Late Pick Up)*" if is_late else ""
     
-    bot.answer_callback_query(call.id, f"{kid_name} telah Check-Out pada {now_time}!")
+    bot.answer_callback_query(call.id, f"{kid_name} telah Check-Out!")
     bot.edit_message_text(
         chat_id=call.message.chat.id,
         message_id=call.message.message_id,
-        text=f"📤 [{branch}] **{kid_name}** telah berjaya Check-Out pada jam **{now_time}**!\n*(Check-In: {checkin_time})*",
+        text=f"📤 [{branch}] **{kid_name}** telah berjaya Check-Out pada jam **{now_time}**!\n*(Check-In: {checkin_time})*{late_text}",
         parse_mode="Markdown"
     )
 
@@ -450,11 +352,10 @@ def callback_clockin_staff(call):
     staff_name = call.data.replace("clockin_staff_", "")
     now_time = datetime.now(MY_TZ).strftime("%I:%M %p")
     
-    if branch not in active_staff_clockin:
-        active_staff_clockin[branch] = {}
-    active_staff_clockin[branch][staff_name] = now_time
+    active_staff_clockin.setdefault(branch, {})[staff_name] = now_time
+    daily_logs[branch]["staff"].setdefault(staff_name, {})["in"] = now_time
     
-    bot.answer_callback_query(call.id, f"{staff_name} telah Clock-In pada {now_time}!")
+    bot.answer_callback_query(call.id, f"{staff_name} telah Clock-In!")
     bot.edit_message_text(
         chat_id=call.message.chat.id,
         message_id=call.message.message_id,
@@ -467,195 +368,86 @@ def callback_clockout_staff(call):
     chat_id = call.message.chat.id
     branch = user_branches.get(chat_id, "Taska 1")
     staff_name = call.data.replace("clockout_staff_", "")
-    now_time = datetime.now(MY_TZ).strftime("%I:%M %p")
+    now_dt = datetime.now(MY_TZ)
+    now_time = now_dt.strftime("%I:%M %p")
+    
+    # Semak OT Staff (Contoh: Tamat syif biasa jam 6:00 PM / 18:00)
+    is_ot = now_dt.hour >= 18
     
     clockin_time = active_staff_clockin.get(branch, {}).pop(staff_name, "N/A")
-    
-    bot.answer_callback_query(call.id, f"{staff_name} telah Clock-Out pada {now_time}!")
+    staff_log = daily_logs[branch]["staff"].setdefault(staff_name, {})
+    staff_log["out"] = now_time
+    staff_log["ot"] = is_ot
+
+    ot_text = "\n⏳ *(Dikira Overtime / OT)*" if is_ot else ""
+
+    bot.answer_callback_query(call.id, f"{staff_name} telah Clock-Out!")
     bot.edit_message_text(
         chat_id=call.message.chat.id,
         message_id=call.message.message_id,
-        text=f"🔴 [{branch}] **{staff_name}** telah berjaya Clock-Out pada jam **{now_time}**!\n*(Clock-In: {clockin_time})*",
+        text=f"🔴 [{branch}] **{staff_name}** telah berjaya Clock-Out pada jam **{now_time}**!\n*(Clock-In: {clockin_time})*{ot_text}",
         parse_mode="Markdown"
     )
 
 
-# --- CALLBACKS UNTUK YURAN ---
-@bot.callback_query_handler(func=lambda call: call.data.startswith("fee_branch_"))
-def callback_fee_branch(call):
-    branch = call.data.replace("fee_branch_", "")
+# --- MENU LAPORAN MANUAL ---
+@bot.message_handler(func=lambda message: message.text and "Laporan" in message.text)
+def handle_laporan_manual(message):
+    report_text = jana_teks_laporan_lengkap()
+    chat_id = message.chat.id
+    menu_semasa = get_owner_sub_menu() if str(chat_id) in OWNER_IDS else get_staff_sub_menu()
+    bot.reply_to(message, report_text, parse_mode="Markdown", reply_markup=menu_semasa)
+
+
+# --- MENU LAIN-LAIN ---
+def semak_owner(message):
+    if str(message.chat.id) not in OWNER_IDS:
+        bot.reply_to(message, "⚠️ Maaf, menu ini hanya boleh diakses oleh Owner Taska sahaja.")
+        return False
+    return True
+
+@bot.message_handler(func=lambda message: message.text and "Late Pick Up Charges" in message.text)
+def handle_late_pickup(message):
+    if not semak_owner(message): return
+    bot.reply_to(message, "⏱️ Semakan Caj Late Pick Up", parse_mode="Markdown")
+
+@bot.message_handler(func=lambda message: message.text and "OT Staff" in message.text)
+def handle_ot_staff(message):
+    if not semak_owner(message): return
+    bot.reply_to(message, "⌛ Rekod Overtime (OT) Staff", parse_mode="Markdown")
+
+@bot.message_handler(func=lambda message: message.text and "Pendaftaran Baru Anak-Anak" in message.text)
+def handle_pendaftaran_baru(message):
+    if not semak_owner(message): return
     markup = InlineKeyboardMarkup()
     markup.add(
-        InlineKeyboardButton("📋 Semak Status Yuran Anak", callback_data=f"fee_check_{branch}"),
-        InlineKeyboardButton("💵 Kemaskini Bayaran Manual", callback_data=f"fee_update_{branch}")
+        InlineKeyboardButton("🏠 Taska 1", callback_data="reg_branch_Taska 1"),
+        InlineKeyboardButton("🏠 Taska 2", callback_data="reg_branch_Taska 2"),
+        InlineKeyboardButton("🏠 Taska 3", callback_data="reg_branch_Taska 3")
     )
-    bot.edit_message_text(
-        chat_id=call.message.chat.id,
-        message_id=call.message.message_id,
-        text=f"💳 **[{branch}] Pengurusan Status & Bayaran Yuran**\n\nSila pilih tindakan di bawah:",
-        parse_mode="Markdown",
-        reply_markup=markup
-    )
+    bot.reply_to(message, "📝 Menu Pendaftaran Baru Anak-Anak", reply_markup=markup)
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("fee_check_"))
-def callback_fee_check(call):
-    branch = call.data.replace("fee_check_", "")
-    text = f"💳 **Penyata Status Yuran - [{branch}]**\n\n"
-
-    for name in KIDS_LIST:
-        data = get_kid_fee_data(branch, name)
-        perlu = data["perlu"]
-        dibayar = data["dibayar"]
-        baki = perlu - dibayar
-        
-        status_str = "✅ *Lunas*" if baki <= 0 else "❌ *Belum Lunas*"
-        
-        text += (
-            f"👶 **{name}**\n"
-            f"• Jumlah Perlu Dibayar: RM {perlu:.2f}\n"
-            f"• Jumlah Dah Dibayar: RM {dibayar:.2f}\n"
-            f"• Baki: RM {baki:.2f}\n"
-            f"• Status: {status_str}\n\n"
-        )
-        
-    bot.answer_callback_query(call.id, "Memaparkan ringkasan yuran.")
-    bot.edit_message_text(
-        chat_id=call.message.chat.id,
-        message_id=call.message.message_id,
-        text=text,
-        parse_mode="Markdown"
-    )
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("fee_update_"))
-def callback_fee_update(call):
-    branch = call.data.replace("fee_update_", "")
-    markup = InlineKeyboardMarkup()
-    for name in KIDS_LIST:
-        markup.add(
-            InlineKeyboardButton(f"💵 Bayar: {name}", callback_data=f"input_pay_{branch}_{name}")
-        )
-        
-    bot.answer_callback_query(call.id, "Sila pilih nama anak.")
-    bot.edit_message_text(
-        chat_id=call.message.chat.id,
-        message_id=call.message.message_id,
-        text=f"💳 **[{branch}] Kemaskini Bayaran Yuran Manual**\n\nSila pilih nama anak untuk masukkan jumlah bayaran:",
-        parse_mode="Markdown",
-        reply_markup=markup
-    )
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("input_pay_"))
-def callback_input_pay(call):
-    parts = call.data.replace("input_pay_", "").split("_", 1)
-    branch = parts[0]
-    kid_name = parts[1]
-    chat_id = call.message.chat.id
-    
-    user_states[chat_id] = {"action": "input_payment", "branch": branch, "kid_name": kid_name}
-
-    bot.answer_callback_query(call.id, f"Sila taip jumlah bayaran untuk {kid_name}")
-    bot.send_message(
-        chat_id=chat_id,
-        text=f"💵 Sila taip **jumlah bayaran (RM)** yang dibuat oleh penjaga **{kid_name}** di bawah:\n*(Contoh: 150 atau 300)*",
-        parse_mode="Markdown"
-    )
-
-# Callback Pendaftaran Baru
-@bot.callback_query_handler(func=lambda call: call.data.startswith("reg_branch_"))
-def callback_reg_branch(call):
-    branch = call.data.replace("reg_branch_", "")
-    chat_id = call.message.chat.id
-    user_states[chat_id] = {"action": "input_register_name", "branch": branch}
-
-    bot.edit_message_text(
-        chat_id=call.message.chat.id,
-        message_id=call.message.message_id,
-        text=f"📝 **[{branch}] Pendaftaran Anak Baru**\n\nSila taip **Nama Penuh Anak** di bawah:",
-        parse_mode="Markdown"
-    )
-
-# Callback Keluarkan Dari Senarai
-@bot.callback_query_handler(func=lambda call: call.data.startswith("rem_branch_"))
-def callback_rem_branch(call):
-    branch = call.data.replace("rem_branch_", "")
+@bot.message_handler(func=lambda message: message.text and "Keluarkan Dari Senarai" in message.text)
+def handle_keluarkan_senarai(message):
+    if not semak_owner(message): return
     markup = InlineKeyboardMarkup()
     markup.add(
-        InlineKeyboardButton("👶 Keluarkan Nama Anak", callback_data=f"rem_type_kid_{branch}"),
-        InlineKeyboardButton("👤 Keluarkan Nama Staff", callback_data=f"rem_type_staff_{branch}")
+        InlineKeyboardButton("🏠 Taska 1", callback_data="rem_branch_Taska 1"),
+        InlineKeyboardButton("🏠 Taska 2", callback_data="rem_branch_Taska 2"),
+        InlineKeyboardButton("🏠 Taska 3", callback_data="rem_branch_Taska 3")
     )
-    bot.edit_message_text(
-        chat_id=call.message.chat.id,
-        message_id=call.message.message_id,
-        text=f"❌ **[{branch}]**\nSila pilih kategori yang ingin dikeluarkan:",
-        parse_mode="Markdown",
-        reply_markup=markup
-    )
+    bot.reply_to(message, "❌ Menu Keluarkan Dari Senarai", reply_markup=markup)
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("rem_type_kid_"))
-def callback_rem_type_kid(call):
-    branch = call.data.replace("rem_type_kid_", "")
+@bot.message_handler(func=lambda message: message.text and "Status & Bayaran Yuran" in message.text)
+def handle_status_yuran(message):
+    if not semak_owner(message): return
     markup = InlineKeyboardMarkup()
-    for name in KIDS_LIST:
-        markup.add(
-            InlineKeyboardButton(f"❌ {name}", callback_data=f"remove_kid_{branch}_{name}")
-        )
-    bot.edit_message_text(
-        chat_id=call.message.chat.id,
-        message_id=call.message.message_id,
-        text=f"[{branch}] Sila pilih nama anak untuk dikeluarkan:",
-        reply_markup=markup
+    markup.add(
+        InlineKeyboardButton("🏠 Taska 1", callback_data="fee_branch_Taska 1"),
+        InlineKeyboardButton("🏠 Taska 2", callback_data="fee_branch_Taska 2"),
+        InlineKeyboardButton("🏠 Taska 3", callback_data="fee_branch_Taska 3")
     )
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("rem_type_staff_"))
-def callback_rem_type_staff(call):
-    branch = call.data.replace("rem_type_staff_", "")
-    markup = InlineKeyboardMarkup()
-    for name in STAFF_LIST:
-        markup.add(
-            InlineKeyboardButton(f"❌ {name}", callback_data=f"remove_staff_{branch}_{name}")
-        )
-    bot.edit_message_text(
-        chat_id=call.message.chat.id,
-        message_id=call.message.message_id,
-        text=f"[{branch}] Sila pilih nama staff untuk dikeluarkan:",
-        reply_markup=markup
-    )
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("remove_kid_"))
-def callback_remove_kid_action(call):
-    parts = call.data.replace("remove_kid_", "").split("_", 1)
-    branch = parts[0]
-    kid_name = parts[1]
-    if kid_name in KIDS_LIST:
-        KIDS_LIST.remove(kid_name)
-
-    bot.answer_callback_query(call.id, f"{kid_name} telah dikeluarkan!")
-    bot.edit_message_text(
-        chat_id=call.message.chat.id,
-        message_id=call.message.message_id,
-        text=f"❌ [{branch}] **{kid_name}** telah berjaya dikeluarkan dari senarai.",
-        parse_mode="Markdown"
-    )
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("remove_staff_"))
-def callback_remove_staff_action(call):
-    parts = call.data.replace("remove_staff_", "").split("_", 1)
-    branch = parts[0]
-    staff_name = parts[1]
-    if staff_name in STAFF_LIST:
-        STAFF_LIST.remove(staff_name)
-        
-    bot.answer_callback_query(call.id, f"{staff_name} telah dikeluarkan!")
-    bot.edit_message_text(
-        chat_id=call.message.chat.id,
-        message_id=call.message.message_id,
-        text=f"❌ [{branch}] **{staff_name}** telah berjaya dikeluarkan dari senarai.",
-        parse_mode="Markdown"
-    )
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("ignore_"))
-def callback_ignore(call):
-    bot.answer_callback_query(call.id, "Rekod sudah didaftarkan hari ini.")
+    bot.reply_to(message, "💳 Menu Status & Bayaran Yuran", reply_markup=markup)
 
 
 # --- HANDLER INPUT TEKS ---
@@ -664,86 +456,36 @@ def handle_all_text_inputs(message):
     chat_id = message.chat.id
     text = message.text.strip()
     
-    # 1. Bayaran manual
     if chat_id in user_states and user_states[chat_id].get("action") == "input_payment":
         state = user_states.pop(chat_id)
-        branch = state["branch"]
-        kid_name = state["kid_name"]
-        
         try:
             amount = float(text)
-            data = get_kid_fee_data(branch, kid_name)
+            data = get_kid_fee_data(state["branch"], state["kid_name"])
             data["dibayar"] += amount
-            perlu = data["perlu"]
-            dibayar = data["dibayar"]
-            baki = perlu - dibayar
-            status_str = "✅ *Lunas*" if baki <= 0 else "❌ *Belum Lunas*"
-            
-            bot.reply_to(
-                message,
-                f"💵 **[{branch}] Kemaskini Bayaran Berjaya!**\n\n"
-                f"👶 **{kid_name}**\n"
-                f"• Bayaran Dimasukkan: RM {amount:.2f}\n"
-                f"• Jumlah Perlu Dibayar: RM {perlu:.2f}\n"
-                f"• Jumlah Dah Dibayar: RM {dibayar:.2f}\n"
-                f"• Baki: RM {baki:.2f}\n"
-                f"• Status: {status_str}",
-                parse_mode="Markdown",
-                reply_markup=get_sub_menu(branch)
-            )
+            bot.reply_to(message, f"💵 Bayaran RM {amount:.2f} untuk **{state['kid_name']}** berjaya dikemaskini!", parse_mode="Markdown", reply_markup=get_owner_sub_menu())
         except ValueError:
-            bot.reply_to(message, "⚠️ Sila masukkan nombor jumlah bayaran yang sah (Contoh: 150 atau 300).")
+            bot.reply_to(message, "⚠️ Sila masukkan nombor yang sah.")
         return
 
-    # 2. Pendaftaran nama anak baru
     if chat_id in user_states and user_states[chat_id].get("action") == "input_register_name":
-        state = user_states[chat_id]
-        state["kid_name"] = text
-        state["action"] = "input_register_fee"
-        
-        bot.reply_to(
-            message,
-            f"📝 **Nama Anak:** {text}\n\nSila taip **Jumlah Yuran Perlu Dibayar (RM)** bagi anak ini:\n*(Contoh: 300 atau 350)*",
-            parse_mode="Markdown"
-        )
+        user_states[chat_id]["kid_name"] = text
+        user_states[chat_id]["action"] = "input_register_fee"
+        bot.reply_to(message, f"📝 Nama: {text}\nSila taip **Jumlah Yuran (RM)**:", parse_mode="Markdown")
         return
 
-    # 3. Masukkan yuran anak baru
     if chat_id in user_states and user_states[chat_id].get("action") == "input_register_fee":
         state = user_states.pop(chat_id)
-        branch = state["branch"]
-        kid_name = state["kid_name"]
-        
         try:
             fee_amount = float(text)
-            if kid_name not in KIDS_LIST:
-                KIDS_LIST.append(kid_name)
-                
-            if branch not in kids_fees:
-                kids_fees[branch] = {}
-            kids_fees[branch][kid_name] = {"perlu": fee_amount, "dibayar": 0.0}
-            
-            bot.reply_to(
-                message,
-                f"✅ **[{branch}] Pendaftaran Anak Baru Berjaya!**\n\n"
-                f"👶 **Nama Anak:** {kid_name}\n"
-                f"💳 **Jumlah Yuran Bulanan:** RM {fee_amount:.2f}\n"
-                f" Status: ❌ *Belum Lunas*",
-                parse_mode="Markdown",
-                reply_markup=get_sub_menu(branch)
-            )
+            if state["kid_name"] not in KIDS_LIST: KIDS_LIST.append(state["kid_name"])
+            kids_fees.setdefault(state["branch"], {})[state["kid_name"]] = {"perlu": fee_amount, "dibayar": 0.0}
+            bot.reply_to(message, f"✅ Berjaya daftar **{state['kid_name']}** dengan yuran RM {fee_amount:.2f}!", parse_mode="Markdown", reply_markup=get_owner_sub_menu())
         except ValueError:
-            bot.reply_to(message, "⚠️ Sila masukkan nombor jumlah yuran yang sah (Contoh: 300 atau 350).")
+            bot.reply_to(message, "⚠️ Sila masukkan nombor yuran yang sah.")
         return
 
-    # Fallback biasa
-    branch = user_branches.get(chat_id)
-    reply_markup = get_sub_menu(branch) if branch else get_main_branch_menu()
-    bot.reply_to(
-        message,
-        "Sila gunakan butang menu di bawah untuk berurusan dengan bot.",
-        reply_markup=reply_markup,
-    )
+    menu_aktif = get_owner_sub_menu() if str(chat_id) in OWNER_IDS else get_staff_sub_menu()
+    bot.reply_to(message, "Sila gunakan butang menu di bawah:", reply_markup=menu_aktif)
 
 
 # --- WEBHOOK & SERVER START ---
