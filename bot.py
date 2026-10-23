@@ -8,7 +8,7 @@ bot = telebot.TeleBot(TOKEN)
 
 # Fungsi yang akan dijalankan secara automatik setiap Isnin hingga Jumaat pada pukul 11:00 malam
 def hantar_laporan_malam():
-    chat_id = "MASUKKAN_CHAT_ID_ANDA"  # Gantikan dengan Chat ID Telegram anda atau ID Group
+    chat_id = "8353544393"  # Gantikan dengan Chat ID Telegram anda atau ID Group
     
     teks_laporan = (
         "📊 *Laporan Harian Taska (Automatik)*\n\n"
