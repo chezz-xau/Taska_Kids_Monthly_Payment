@@ -84,7 +84,7 @@ def get_main_branch_menu():
 
 
 def get_sub_menu(branch_name):
-    """Sub-Menu Utama mengikut Cawangan (Tukar Cawangan Dipadamkan)"""
+    """Sub-Menu Utama mengikut Cawangan"""
     markup = ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
     markup.add(
         KeyboardButton("📥 Check-In Anak"),
@@ -157,7 +157,7 @@ def handle_branch_selection(message):
     )
 
 
-# Handler Check-In Anak
+# Handler Check-In Anak (Semak status terkini: Merah jika sudah check-in dan belum check-out)
 @bot.message_handler(
     func=lambda message: message.text and "Check-In Anak" in message.text
 )
@@ -166,20 +166,28 @@ def handle_check_in_anak(message):
     branch = user_branches.get(chat_id, "Taska 1")
     today_str = datetime.now(MY_TZ).strftime("%Y-%m-%d")
     df = get_sheet_data()
-    checked_in_today = []
+    
+    currently_checked_in = []
 
-    if not df.empty and "Tarikh" in df.columns:
-        filtered = df[
-            (df["Tarikh"].astype(str) == today_str) & (df["Aktiviti"] == "Check-In")
-        ]
-        checked_in_today = filtered["Nama"].tolist()
+    if not df.empty and "Tarikh" in df.columns and "Nama" in df.columns and "Aktiviti" in df.columns:
+        if "Cawangan" in df.columns:
+            df_filtered = df[(df["Tarikh"].astype(str) == today_str) & (df["Cawangan"] == branch) & (df["Kategori"] == "Anak")]
+        else:
+            df_filtered = df[(df["Tarikh"].astype(str) == today_str) & (df["Kategori"] == "Anak")]
+            
+        for name in KIDS_LIST:
+            kid_rows = df_filtered[df_filtered["Nama"] == name]
+            if not kid_rows.empty:
+                last_row = kid_rows.iloc[-1]
+                if last_row["Aktiviti"] == "Check-In":
+                    currently_checked_in.append(name)
 
     markup = InlineKeyboardMarkup()
     for name in KIDS_LIST:
-        if name in checked_in_today:
+        if name in currently_checked_in:
             markup.add(
                 InlineKeyboardButton(
-                    f"🟢 {name} (Sudah Check-In)", callback_data=f"ignore_{name}"
+                    f"🔴 {name} (Sudah Check-In)", callback_data=f"ignore_{name}"
                 )
             )
         else:
@@ -299,7 +307,7 @@ def handle_ot_staff(message):
     )
 
 
-# Handler Pendaftaran Baru Anak-Anak (Papar 3 Pilihan Cawangan)
+# Handler Pendaftaran Baru Anak-Anak
 @bot.message_handler(
     func=lambda message: message.text and "Pendaftaran Baru Anak-Anak" in message.text
 )
@@ -318,7 +326,7 @@ def handle_pendaftaran_baru(message):
     )
 
 
-# Handler Keluarkan Dari Senarai (Papar 3 Pilihan Cawangan)
+# Handler Keluarkan Dari Senarai
 @bot.message_handler(
     func=lambda message: message.text and "Keluarkan Dari Senarai" in message.text
 )
@@ -552,7 +560,7 @@ def callback_remove_staff_action(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("ignore_"))
 def callback_ignore(call):
-    bot.answer_callback_query(call.id, "Rekod ini sudah didaftarkan hari ini.")
+    bot.answer_callback_query(call.id, "Rekod ini sudah didaftarkan hari ini atau status aktif memerlukan Check-Out dahulu.")
 
 
 @bot.message_handler(func=lambda message: True)
