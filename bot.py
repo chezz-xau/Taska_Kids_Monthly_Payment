@@ -1,17 +1,14 @@
-import logging
-from telegram.ext import Application
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
+import os
+import telebot
+from apscheduler.schedulers.background import BackgroundScheduler
 
-# Tetapan logging untuk memantau status bot
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
-logger = logging.getLogger(__name__)
+# Token Bot Telegram anda
+TOKEN = "TOKEN_BOT_ANDA"  # atau guna os.environ.get('BOT_TOKEN') jika guna .env
+bot = telebot.TeleBot(TOKEN)
 
 # Fungsi yang akan dijalankan secara automatik setiap Isnin hingga Jumaat pada pukul 11:00 malam
-async def hantar_laporan_malam(application: Application):
-    chat_id = "MASUKKAN_CHAT_ID_ADMIN_ATAU_GROUP"  # Gantikan dengan Chat ID anda atau ID Group Telegram
+def hantar_laporan_malam():
+    chat_id = "MASUKKAN_CHAT_ID_ADMIN_ATAU_GROUP"  # Gantikan dengan Chat ID anda
     
     teks_laporan = (
         "📊 *Laporan Harian Taska (Automatik)*\n\n"
@@ -20,47 +17,27 @@ async def hantar_laporan_malam(application: Application):
     )
     
     try:
-        await application.bot.send_message(
-            chat_id=chat_id,
-            text=teks_laporan,
-            parse_mode="Markdown"
-        )
-        logger.info("Laporan malam berjaya dihantar secara automatik.")
+        bot.send_message(chat_id, teks_laporan, parse_mode="Markdown")
+        print("Laporan malam berjaya dihantar secara automatik.")
     except Exception as e:
-        logger.error(f"Gagal menghantar laporan automatik: {e}")
+        print(f"Gagal menghantar laporan automatik: {e}")
 
-# Fungsi untuk memulakan APScheduler
-def setup_scheduler(application: Application):
-    scheduler = AsyncIOScheduler(timezone="Asia/Kuala_Lumpur")
-    
-    # Tetapkan masa: Isnin hingga Jumaat (mon-fri) pada jam 23:00 (11:00 malam)
-    scheduler.add_job(
-        hantar_laporan_malam,
-        trigger=CronTrigger(day_of_week='mon-fri', hour=23, minute=0),
-        args=[application]
-    )
-    
-    scheduler.start()
-    logger.info("Scheduler APScheduler telah diaktifkan.")
+# Tetapan APScheduler (Gunakan BackgroundScheduler untuk telebot)
+scheduler = BackgroundScheduler(timezone="Asia/Kuala_Lumpur")
+scheduler.add_job(
+    hantar_laporan_malam,
+    trigger='cron',
+    day_of_week='mon-fri',
+    hour=23,
+    minute=0
+)
+scheduler.start()
 
-def main():
-    # Gantikan dengan Token Bot Telegram anda yang sebenar
-    TOKEN = "TOKEN_BOT_ANDA"
-    
-    # Bina aplikasi bot
-    application = Application.builder().token(TOKEN).build()
-    
-    # Aktifkan fungsi penjadualan automatik
-    setup_scheduler(application)
-    
-    # ---------------------------------------------------------
-    # (Anda boleh letakkan command / handler bot lain di sini)
-    # Contoh: application.add_handler(CommandHandler("start", start))
-    # ---------------------------------------------------------
-    
-    # Mula jalankan bot
-    logger.info("Bot sedang berjalan...")
-    application.run_polling()
+# Contoh Command Handler sedia ada
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
+    bot.reply_to(message, "Bot Taska 1 sedang aktif!")
 
 if __name__ == "__main__":
-    main()
+    print("Bot sedang berjalan...")
+    bot.infinity_polling()
