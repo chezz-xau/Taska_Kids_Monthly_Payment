@@ -13,11 +13,11 @@ from apscheduler.schedulers.background import BackgroundScheduler
 # ==========================================
 # ⚙️ TETAPAN UTAMA & KAWALAN AKSES (ROLES)
 # ==========================================
-TELEGRAM_TOKEN = "8675996323:AAFFlD67gt2HXet63MKEo08iJYm8ojVcol0"  # Token Bot anda
-TELEGRAM_CHAT_ID = "8353544393"                       # Chat ID Owner (untuk laporan 11 malam)
+TELEGRAM_TOKEN = "8675996323:8675996323:AAFFlD67gt2HXet63MKEo08iJYm8ojVcol0"  # Token Bot Anda
+TELEGRAM_CHAT_ID = "8353544393"                       # Chat ID Owner (Laporan 11 malam dihantar ke sini)
 
 # Senarai ID Telegram Owner & Staff
-OWNER_IDS = ["8353544393"]               # Masukkan Chat ID Owner
+OWNER_IDS = ["8353544393"]               # Masukkan Chat ID Owner (cth: ["123456789"])
 STAFF_IDS = ["111222333", "444555666"]      # Masukkan Chat ID Staff
 # ==========================================
 
@@ -42,7 +42,6 @@ active_checkins = {}      # Format: {"Taska 1": {"Ahmad": "08:15 AM"}}
 active_staff_clockin = {} # Format: {"Taska 1": {"Siti Maryam": "07:45 AM"}}
 
 # 📜 REKOD SEJARAH HARIAN (DAILY HISTORY LOGS)
-# Disimpan sepanjang hari untuk dijana pada laporan 11:00 malam
 daily_logs = {
     branch: {
         "kids": {},   # Format: {"Ahmad": {"in": "08:15 AM", "out": "06:30 PM", "late": True}}
@@ -68,11 +67,11 @@ def get_kid_fee_data(branch, kid_name):
 
 
 # ==========================================
-# 📊 FUNGSI JANA LAPORAN LENGKAP (SEMUA TASKA)
+# 📊 FUNGSI JANA LAPORAN MULTI-BRANCH OWNER
 # ==========================================
-def jana_teks_laporan_lengkap():
+def jana_teks_laporan_lengkap_semua_cawangan():
     today_str = datetime.now(MY_TZ).strftime("%Y-%m-%d")
-    report_text = f"📊 **LAPORAN HARIAN TASKA (PENUH)**\n📅 *Tarikh: {today_str}*\n"
+    report_text = f"📊 **LAPORAN HARIAN SEMUA CAWANGAN TASKA**\n📅 *Tarikh: {today_str}*\n"
     report_text += "=============================\n\n"
 
     for branch in BRANCHES:
@@ -106,18 +105,19 @@ def jana_teks_laporan_lengkap():
 
     return report_text
 
-def hantar_laporan_malam():
-    report_text = jana_teks_laporan_lengkap()
+# Hantar laporan 11:00 malam untuk KESEMUA cawangan HANYA kepada Owner
+def hantar_laporan_malam_owner():
+    report_text = jana_teks_laporan_lengkap_semua_cawangan()
     try:
         bot.send_message(TELEGRAM_CHAT_ID, report_text, parse_mode="Markdown")
-        print("Laporan malam berjaya dihantar secara automatik.")
+        print("Laporan gabungan semua cawangan 11:00 malam berjaya dihantar kepada Owner.")
     except Exception as e:
-        print(f"Gagal menghantar laporan automatik: {e}")
+        print(f"Gagal menghantar laporan automatik kepada Owner: {e}")
 
 # Aktifkan Scheduler (Isnin - Jumaat jam 11:00 malam)
 scheduler = BackgroundScheduler(timezone="Asia/Kuala_Lumpur")
 scheduler.add_job(
-    hantar_laporan_malam,
+    hantar_laporan_malam_owner,
     trigger='cron',
     day_of_week='mon-fri',
     hour=23,
@@ -126,7 +126,7 @@ scheduler.add_job(
 scheduler.start()
 
 
-# --- KEYBOARD MENUS ---
+# --- KEYBOARD MENUS (STAFF VS OWNER) ---
 def get_main_branch_menu():
     markup = ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
     markup.add(
@@ -138,6 +138,7 @@ def get_main_branch_menu():
     )
     return markup
 
+# Menu Staff: Hanya Check-In/Out Anak & Clock-In/Out Staff
 def get_staff_sub_menu():
     markup = ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
     markup.add(
@@ -150,20 +151,11 @@ def get_staff_sub_menu():
     )
     return markup
 
+# Menu Owner: Pengawasan, Yuran, Pendaftaran, dan Laporan Gabungan
 def get_owner_sub_menu():
     markup = ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
     markup.add(
-        KeyboardButton("📥 Check-In Anak"),
-        KeyboardButton("📤 Check-Out Anak")
-    )
-    markup.add(
-        KeyboardButton("⏱️ Late Pick Up Charges")
-    )
-    markup.add(
-        KeyboardButton("🟢 Clock-In Staff"),
-        KeyboardButton("🔴 Clock-Out Staff")
-    )
-    markup.add(
+        KeyboardButton("⏱️ Late Pick Up Charges"),
         KeyboardButton("⌛ OT Staff")
     )
     markup.add(
@@ -226,14 +218,11 @@ def handle_branch_selection(message):
         reply_markup=menu_dipilih,
     )
 
-# Handler Check-In Anak
-@bot.message_handler(
-    func=lambda message: message.text and "Check-In Anak" in message.text
-)
+# --- HANDLER CHECK-IN/OUT (KHAS STAFF) ---
+@bot.message_handler(func=lambda message: message.text and "Check-In Anak" in message.text)
 def handle_check_in_anak(message):
     branch = user_branches.get(message.chat.id, "Taska 1")
     checked_in_today = active_checkins.get(branch, {})
-    
     markup = InlineKeyboardMarkup()
     for name in KIDS_LIST:
         if name in checked_in_today:
@@ -241,17 +230,12 @@ def handle_check_in_anak(message):
             markup.add(InlineKeyboardButton(f"🔴 {name} (Sudah Check-In: {time_str})", callback_data=f"ignore_{name}"))
         else:
             markup.add(InlineKeyboardButton(f"📥 {name} (Check-In)", callback_data=f"checkin_kid_{name}"))
-
     bot.reply_to(message, f"[{branch}]\nSila pilih nama anak untuk Check-In:", reply_markup=markup)
 
-# Handler Check-Out Anak
-@bot.message_handler(
-    func=lambda message: message.text and "Check-Out Anak" in message.text
-)
+@bot.message_handler(func=lambda message: message.text and "Check-Out Anak" in message.text)
 def handle_check_out_anak(message):
     branch = user_branches.get(message.chat.id, "Taska 1")
     checked_in_today = active_checkins.get(branch, {})
-    
     markup = InlineKeyboardMarkup()
     for name in KIDS_LIST:
         if name in checked_in_today:
@@ -259,17 +243,12 @@ def handle_check_out_anak(message):
             markup.add(InlineKeyboardButton(f"📤 {name} (Check-In jam {time_str})", callback_data=f"checkout_kid_{name}"))
         else:
             markup.add(InlineKeyboardButton(f"⚪ {name} (Belum Check-In)", callback_data=f"ignore_uncheck_{name}"))
-            
     bot.reply_to(message, f"[{branch}]\nSila pilih nama anak untuk Check-Out:", reply_markup=markup)
 
-# Handler Clock-In Staff
-@bot.message_handler(
-    func=lambda message: message.text and "Clock-In Staff" in message.text
-)
+@bot.message_handler(func=lambda message: message.text and "Clock-In Staff" in message.text)
 def handle_clock_in_staff(message):
     branch = user_branches.get(message.chat.id, "Taska 1")
     clocked_in_today = active_staff_clockin.get(branch, {})
-    
     markup = InlineKeyboardMarkup()
     for name in STAFF_LIST:
         if name in clocked_in_today:
@@ -277,17 +256,12 @@ def handle_clock_in_staff(message):
             markup.add(InlineKeyboardButton(f"🟢 {name} (Sudah Hadir: {time_str})", callback_data=f"ignore_{name}"))
         else:
             markup.add(InlineKeyboardButton(f"🔴 {name} (Belum Hadir)", callback_data=f"clockin_staff_{name}"))
-
     bot.reply_to(message, f"[{branch}]\nSila pilih nama staff untuk Clock-In:", reply_markup=markup)
 
-# Handler Clock-Out Staff
-@bot.message_handler(
-    func=lambda message: message.text and "Clock-Out Staff" in message.text
-)
+@bot.message_handler(func=lambda message: message.text and "Clock-Out Staff" in message.text)
 def handle_clock_out_staff(message):
     branch = user_branches.get(message.chat.id, "Taska 1")
     clocked_in_today = active_staff_clockin.get(branch, {})
-    
     markup = InlineKeyboardMarkup()
     for name in STAFF_LIST:
         if name in clocked_in_today:
@@ -295,18 +269,16 @@ def handle_clock_out_staff(message):
             markup.add(InlineKeyboardButton(f"🔴 {name} (Clock-In: {time_str})", callback_data=f"clockout_staff_{name}"))
         else:
             markup.add(InlineKeyboardButton(f"⚪ {name} (Belum Clock-In)", callback_data=f"ignore_uncheck_{name}"))
-
     bot.reply_to(message, f"[{branch}]\nSila pilih nama staff untuk Clock-Out:", reply_markup=markup)
 
 
-# --- CALLBACK QUERY HANDLERS (SEJARAH RECORD) ---
+# --- CALLBACK QUERY HANDLERS ---
 @bot.callback_query_handler(func=lambda call: call.data.startswith("checkin_kid_"))
 def callback_checkin_kid(call):
     chat_id = call.message.chat.id
     branch = user_branches.get(chat_id, "Taska 1")
     kid_name = call.data.replace("checkin_kid_", "")
-    now_dt = datetime.now(MY_TZ)
-    now_time = now_dt.strftime("%I:%M %p")
+    now_time = datetime.now(MY_TZ).strftime("%I:%M %p")
     
     active_checkins.setdefault(branch, {})[kid_name] = now_time
     daily_logs[branch]["kids"].setdefault(kid_name, {})["in"] = now_time
@@ -327,9 +299,7 @@ def callback_checkout_kid(call):
     now_dt = datetime.now(MY_TZ)
     now_time = now_dt.strftime("%I:%M %p")
     
-    # Semak late pick up (Contoh: Tamat operasi jam 6:00 PM / 18:00)
     is_late = now_dt.hour >= 18
-    
     checkin_time = active_checkins.get(branch, {}).pop(kid_name, "N/A")
     kid_log = daily_logs[branch]["kids"].setdefault(kid_name, {})
     kid_log["out"] = now_time
@@ -371,9 +341,7 @@ def callback_clockout_staff(call):
     now_dt = datetime.now(MY_TZ)
     now_time = now_dt.strftime("%I:%M %p")
     
-    # Semak OT Staff (Contoh: Tamat syif biasa jam 6:00 PM / 18:00)
     is_ot = now_dt.hour >= 18
-    
     clockin_time = active_staff_clockin.get(branch, {}).pop(staff_name, "N/A")
     staff_log = daily_logs[branch]["staff"].setdefault(staff_name, {})
     staff_log["out"] = now_time
@@ -390,16 +358,7 @@ def callback_clockout_staff(call):
     )
 
 
-# --- MENU LAPORAN MANUAL ---
-@bot.message_handler(func=lambda message: message.text and "Laporan" in message.text)
-def handle_laporan_manual(message):
-    report_text = jana_teks_laporan_lengkap()
-    chat_id = message.chat.id
-    menu_semasa = get_owner_sub_menu() if str(chat_id) in OWNER_IDS else get_staff_sub_menu()
-    bot.reply_to(message, report_text, parse_mode="Markdown", reply_markup=menu_semasa)
-
-
-# --- MENU LAIN-LAIN ---
+# --- HANDLER KHAS OWNER ---
 def semak_owner(message):
     if str(message.chat.id) not in OWNER_IDS:
         bot.reply_to(message, "⚠️ Maaf, menu ini hanya boleh diakses oleh Owner Taska sahaja.")
@@ -448,6 +407,13 @@ def handle_status_yuran(message):
         InlineKeyboardButton("🏠 Taska 3", callback_data="fee_branch_Taska 3")
     )
     bot.reply_to(message, "💳 Menu Status & Bayaran Yuran", reply_markup=markup)
+
+# Menu Laporan Manual HANYA Boleh Diakses Oleh Owner (Menyediakan ringkasan semua cawangan)
+@bot.message_handler(func=lambda message: message.text and "Laporan" in message.text)
+def handle_laporan_manual(message):
+    if not semak_owner(message): return
+    report_text = jana_teks_laporan_lengkap_semua_cawangan()
+    bot.reply_to(message, report_text, parse_mode="Markdown", reply_markup=get_owner_sub_menu())
 
 
 # --- HANDLER INPUT TEKS ---
