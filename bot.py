@@ -1,8 +1,5 @@
 import os
 from datetime import datetime, timedelta, timezone
-import pandas as pd
-import requests
-
 from flask import Flask, abort, request as flask_request
 import telebot
 from telebot.types import (
@@ -12,13 +9,10 @@ from telebot.types import (
     ReplyKeyboardMarkup,
 )
 
-# 1. Konfigurasi Token & Web App Google
+# 1. Konfigurasi Token Bot
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 if not TOKEN:
     raise ValueError("TELEGRAM_TOKEN tidak ditetapkan dalam environment variables!")
-
-# GANTIKAN DENGAN URL WEB APP GOOGLE APPS SCRIPT ANDA
-WEB_APP_URL = "MASUKKAN_URL_WEB_APP_GOOGLE_ANDA_DI_SINI"
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
@@ -30,48 +24,14 @@ MY_TZ = timezone(timedelta(hours=8))
 STAFF_LIST = ["Siti Maryam", "Adam Harith"]
 KIDS_LIST = ["Ahmad", "Aisha", "Rayyan"]
 
-# Simpanan Sesi Cawangan mengikut pengguna (Chat ID)
+# Simpanan Sesi & Status Kehadiran Sementara (Dalam Memori Bot)
 user_branches = {}
-
-
-# --- FUNGSI GOOGLE SHEETS ---
-def save_to_sheet(name, category, action, branch="Taska 1"):
-    now = datetime.now(MY_TZ)
-    date_str = now.strftime("%Y-%m-%d")
-    time_str = now.strftime("%H:%M:%S")
-
-    payload = {
-        "action": "save",
-        "cawangan": branch,
-        "tarikh": date_str,
-        "masa": time_str,
-        "nama": name,
-        "kategori": category,
-        "aktiviti": action,
-    }
-
-    try:
-        requests.post(WEB_APP_URL, json=payload, timeout=10)
-    except Exception as e:
-        print(f"Ralat simpan ke Google Sheet: {e}")
-
-
-def get_sheet_data():
-    payload = {"action": "get"}
-    try:
-        response = requests.post(WEB_APP_URL, json=payload, timeout=10)
-        data = response.json()
-        if len(data) > 1:
-            df = pd.DataFrame(data[1:], columns=data[0])
-            return df
-    except Exception as e:
-        print(f"Ralat baca Google Sheet: {e}")
-    return pd.DataFrame()
+active_checkins = {}  # Format: {"Taska 1": ["Ahmad"], "Taska 2": [...]}
+active_staff_clockin = {}  # Format: {"Taska 1": ["Siti Maryam"]}
 
 
 # --- KEYBOARD MENUS ---
 def get_main_branch_menu():
-    """Menu Utama: Pilih Cawangan Taska"""
     markup = ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
     markup.add(
         KeyboardButton("🏠 Taska 1"),
@@ -84,7 +44,6 @@ def get_main_branch_menu():
 
 
 def get_sub_menu(branch_name):
-    """Sub-Menu Utama mengikut Cawangan"""
     markup = ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
     markup.add(
         KeyboardButton("📥 Check-In Anak"),
@@ -116,7 +75,7 @@ def get_sub_menu(branch_name):
 # --- FLASK ROUTES ---
 @app.route("/")
 def index():
-    return "Bot Taska sedang aktif!", 200
+    return "Bot Taska sedang aktif (Mod Tanpa Google Sheet)!", 200
 
 
 @app.route(f"/{TOKEN}", methods=["POST"])
@@ -157,34 +116,20 @@ def handle_branch_selection(message):
     )
 
 
-# Handler Check-In Anak (Semak status terkini: Merah jika sudah check-in dan belum check-out)
+# Handler Check-In Anak (Semak status dari memori sementara)
 @bot.message_handler(
     func=lambda message: message.text and "Check-In Anak" in message.text
 )
 def handle_check_in_anak(message):
     chat_id = message.chat.id
     branch = user_branches.get(chat_id, "Taska 1")
-    today_str = datetime.now(MY_TZ).strftime("%Y-%m-%d")
-    df = get_sheet_data()
     
-    currently_checked_in = []
-
-    if not df.empty and "Tarikh" in df.columns and "Nama" in df.columns and "Aktiviti" in df.columns:
-        if "Cawangan" in df.columns:
-            df_filtered = df[(df["Tarikh"].astype(str) == today_str) & (df["Cawangan"] == branch) & (df["Kategori"] == "Anak")]
-        else:
-            df_filtered = df[(df["Tarikh"].astype(str) == today_str) & (df["Kategori"] == "Anak")]
-            
-        for name in KIDS_LIST:
-            kid_rows = df_filtered[df_filtered["Nama"] == name]
-            if not kid_rows.empty:
-                last_row = kid_rows.iloc[-1]
-                if last_row["Aktiviti"] == "Check-In":
-                    currently_checked_in.append(name)
+    # Ambil senarai anak yang sedang check-in di cawangan ini
+    checked_in_today = active_checkins.get(branch, [])
 
     markup = InlineKeyboardMarkup()
     for name in KIDS_LIST:
-        if name in currently_checked_in:
+        if name in checked_in_today:
             markup.add(
                 InlineKeyboardButton(
                     f"🔴 {name} (Sudah Check-In)", callback_data=f"ignore_{name}"
@@ -209,14 +154,24 @@ def handle_check_in_anak(message):
 def handle_check_out_anak(message):
     chat_id = message.chat.id
     branch = user_branches.get(chat_id, "Taska 1")
+    checked_in_today = active_checkins.get(branch, [])
     
     markup = InlineKeyboardMarkup()
     for name in KIDS_LIST:
-        markup.add(
-            InlineKeyboardButton(
-                f"📤 {name} (Check-Out)", callback_data=f"checkout_kid_{name}"
+        # Hanya paparkan butang check-out untuk anak yang sudah check-in
+        if name in checked_in_today:
+            markup.add(
+                InlineKeyboardButton(
+                    f"📤 {name} (Check-Out)", callback_data=f"checkout_kid_{name}"
+                )
             )
-        )
+        else:
+            markup.add(
+                InlineKeyboardButton(
+                    f"⚪ {name} (Belum Check-In)", callback_data=f"ignore_uncheck_{name}"
+                )
+            )
+            
     bot.reply_to(
         message, f"[{branch}]\nSila pilih nama anak untuk Check-Out:", reply_markup=markup
     )
@@ -243,15 +198,7 @@ def handle_late_pickup(message):
 def handle_clock_in_staff(message):
     chat_id = message.chat.id
     branch = user_branches.get(chat_id, "Taska 1")
-    today_str = datetime.now(MY_TZ).strftime("%Y-%m-%d")
-    df = get_sheet_data()
-    clocked_in_today = []
-
-    if not df.empty and "Tarikh" in df.columns:
-        filtered = df[
-            (df["Tarikh"].astype(str) == today_str) & (df["Aktiviti"] == "Clock-In")
-        ]
-        clocked_in_today = filtered["Nama"].tolist()
+    clocked_in_today = active_staff_clockin.get(branch, [])
 
     markup = InlineKeyboardMarkup()
     for name in STAFF_LIST:
@@ -363,35 +310,24 @@ def handle_laporan(message):
     chat_id = message.chat.id
     branch = user_branches.get(chat_id, "Taska 1")
     today_str = datetime.now(MY_TZ).strftime("%Y-%m-%d")
-    df = get_sheet_data()
-
-    if df.empty or "Tarikh" not in df.columns:
-        bot.reply_to(
-            message,
-            "📊 Tiada rekod dijumpai lagi dalam Google Sheet.",
-            reply_markup=get_sub_menu(branch),
-        )
-        return
-
-    df_today = df[df["Tarikh"].astype(str) == today_str]
-
-    if df_today.empty:
-        bot.reply_to(
-            message,
-            f"📊 **Laporan Hari Ini - [{branch}] ({today_str})**\n\nTiada sebarang rekod aktiviti lagi hari ini.",
-            parse_mode="Markdown",
-            reply_markup=get_sub_menu(branch),
-        )
-        return
-
-    report_text = f"📊 **Laporan Kehadiran Hari Ini - [{branch}] ({today_str})**\n\n"
-
-    for index, row in df_today.iterrows():
-        nama = row.get("Nama", "Tidak diketahui")
-        kategori = row.get("Kategori", "-")
-        aktiviti = row.get("Aktiviti", "Aktiviti")
-        masa = row.get("Masa", "-")
-        report_text += f"• **{nama}** ({kategori}) — *{aktiviti}* pada {masa}\n"
+    
+    checked_in_kids = active_checkins.get(branch, [])
+    clocked_staff = active_staff_clockin.get(branch, [])
+    
+    report_text = f"📊 **Laporan Semasa - [{branch}] ({today_str})**\n\n"
+    report_text += f"👶 **Anak Sedang Check-In:**\n"
+    if checked_in_kids:
+        for k in checked_in_kids:
+            report_text += f"• {k}\n"
+    else:
+        report_text += "• Tiada\n"
+        
+    report_text += f"\n👤 **Staff Hadir (Clock-In):**\n"
+    if clocked_staff:
+        for s in clocked_staff:
+            report_text += f"• {s}\n"
+    else:
+        report_text += "• Tiada\n"
 
     bot.reply_to(
         message, report_text, parse_mode="Markdown", reply_markup=get_sub_menu(branch)
@@ -405,12 +341,17 @@ def callback_checkin_kid(call):
     branch = user_branches.get(chat_id, "Taska 1")
     kid_name = call.data.replace("checkin_kid_", "")
     
-    save_to_sheet(kid_name, "Anak", "Check-In", branch)
+    # Masukkan ke senarai memori aktif check-in
+    if branch not in active_checkins:
+        active_checkins[branch] = []
+    if kid_name not in active_checkins[branch]:
+        active_checkins[branch].append(kid_name)
+        
     bot.answer_callback_query(call.id, f"{kid_name} telah Check-In!")
     bot.edit_message_text(
         chat_id=call.message.chat.id,
         message_id=call.message.message_id,
-        text=f"📥 [{branch}] {kid_name} telah berjaya Check-In dan direkodkan ke Google Sheets!",
+        text=f"📥 [{branch}] {kid_name} telah berjaya Check-In!",
     )
 
 
@@ -420,12 +361,15 @@ def callback_checkout_kid(call):
     branch = user_branches.get(chat_id, "Taska 1")
     kid_name = call.data.replace("checkout_kid_", "")
     
-    save_to_sheet(kid_name, "Anak", "Check-Out", branch)
+    # Buang dari senarai memori aktif check-in supaya boleh check-in semula nanti
+    if branch in active_checkins and kid_name in active_checkins[branch]:
+        active_checkins[branch].remove(kid_name)
+        
     bot.answer_callback_query(call.id, f"{kid_name} telah Check-Out!")
     bot.edit_message_text(
         chat_id=call.message.chat.id,
         message_id=call.message.message_id,
-        text=f"📤 [{branch}] {kid_name} telah berjaya Check-Out dan direkodkan ke Google Sheets!",
+        text=f"📤 [{branch}] {kid_name} telah berjaya Check-Out!",
     )
 
 
@@ -435,12 +379,16 @@ def callback_clockin_staff(call):
     branch = user_branches.get(chat_id, "Taska 1")
     staff_name = call.data.replace("clockin_staff_", "")
     
-    save_to_sheet(staff_name, "Staff", "Clock-In", branch)
+    if branch not in active_staff_clockin:
+        active_staff_clockin[branch] = []
+    if staff_name not in active_staff_clockin[branch]:
+        active_staff_clockin[branch].append(staff_name)
+        
     bot.answer_callback_query(call.id, f"{staff_name} telah Clock-In!")
     bot.edit_message_text(
         chat_id=call.message.chat.id,
         message_id=call.message.message_id,
-        text=f"🟢 [{branch}] {staff_name} telah berjaya Clock-In dan direkodkan ke Google Sheets!",
+        text=f"🟢 [{branch}] {staff_name} telah berjaya Clock-In!",
     )
 
 
@@ -450,12 +398,14 @@ def callback_clockout_staff(call):
     branch = user_branches.get(chat_id, "Taska 1")
     staff_name = call.data.replace("clockout_staff_", "")
     
-    save_to_sheet(staff_name, "Staff", "Clock-Out", branch)
+    if branch in active_staff_clockin and staff_name in active_staff_clockin[branch]:
+        active_staff_clockin[branch].remove(staff_name)
+        
     bot.answer_callback_query(call.id, f"{staff_name} telah Clock-Out!")
     bot.edit_message_text(
         chat_id=call.message.chat.id,
         message_id=call.message.message_id,
-        text=f"🔴 [{branch}] {staff_name} telah berjaya Clock-Out dan direkodkan ke Google Sheets!",
+        text=f"🔴 [{branch}] {staff_name} telah berjaya Clock-Out!",
     )
 
 
@@ -533,12 +483,11 @@ def callback_remove_kid_action(call):
     branch = parts[0]
     kid_name = parts[1]
     
-    save_to_sheet(kid_name, "Anak", "Keluarkan Dari Senarai", branch)
     bot.answer_callback_query(call.id, f"{kid_name} telah dikeluarkan!")
     bot.edit_message_text(
         chat_id=call.message.chat.id,
         message_id=call.message.message_id,
-        text=f"❌ [{branch}] {kid_name} telah berjaya dikeluarkan dari senarai dan direkodkan.",
+        text=f"❌ [{branch}] {kid_name} telah berjaya dikeluarkan dari senarai.",
     )
 
 
@@ -549,18 +498,17 @@ def callback_remove_staff_action(call):
     branch = parts[0]
     staff_name = parts[1]
     
-    save_to_sheet(staff_name, "Staff", "Keluarkan Dari Senarai", branch)
     bot.answer_callback_query(call.id, f"{staff_name} telah dikeluarkan!")
     bot.edit_message_text(
         chat_id=call.message.chat.id,
         message_id=call.message.message_id,
-        text=f"❌ [{branch}] {staff_name} telah berjaya dikeluarkan dari senarai dan direkodkan.",
+        text=f"❌ [{branch}] {staff_name} telah berjaya dikeluarkan dari senarai.",
     )
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("ignore_"))
 def callback_ignore(call):
-    bot.answer_callback_query(call.id, "Rekod ini sudah didaftarkan hari ini atau status aktif memerlukan Check-Out dahulu.")
+    bot.answer_callback_query(call.id, "Status sudah dikemas kini atau kanak-kanak ini sudah check-in.")
 
 
 @bot.message_handler(func=lambda message: True)
