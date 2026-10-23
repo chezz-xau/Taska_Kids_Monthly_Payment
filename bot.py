@@ -3,12 +3,12 @@ import telebot
 from apscheduler.schedulers.background import BackgroundScheduler
 
 # Token Bot Telegram anda
-TOKEN = "TOKEN_BOT_ANDA"  # atau guna os.environ.get('BOT_TOKEN') jika guna .env
+TOKEN = "8675996323:AAFKUOUsZaVCpauQnAN7So1TRrjmbv_VLTI"
 bot = telebot.TeleBot(TOKEN)
 
 # Fungsi yang akan dijalankan secara automatik setiap Isnin hingga Jumaat pada pukul 11:00 malam
 def hantar_laporan_malam():
-    chat_id = "MASUKKAN_CHAT_ID_ADMIN_ATAU_GROUP"  # Gantikan dengan Chat ID anda
+    chat_id = "MASUKKAN_CHAT_ID_ANDA"  # Gantikan dengan Chat ID Telegram anda atau ID Group
     
     teks_laporan = (
         "📊 *Laporan Harian Taska (Automatik)*\n\n"
@@ -22,7 +22,7 @@ def hantar_laporan_malam():
     except Exception as e:
         print(f"Gagal menghantar laporan automatik: {e}")
 
-# Tetapan APScheduler (Gunakan BackgroundScheduler untuk telebot)
+# Tetapan APScheduler (Isnin - Jumaat jam 11:00 malam)
 scheduler = BackgroundScheduler(timezone="Asia/Kuala_Lumpur")
 scheduler.add_job(
     hantar_laporan_malam,
