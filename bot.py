@@ -57,7 +57,7 @@ monthly_logs = {
     } for branch in BRANCHES
 }
 
-# 💳 REKOD PENGURUSAN YURAN
+# 💳 REKOD PENGURUSAN YURAN & DAFTAR ANAK PER CAWANAN
 kids_fees = {
     "Taska 1": {
         "Ahmad": {"parent": "Encik Razak", "phone": "0123456789", "perlu": 300.0, "dibayar": 0.0},
@@ -151,16 +151,13 @@ def jana_teks_laporan_bulanan():
 
 # Penjadual Malam (Jam 11:00 Malam)
 def hantar_laporan_malam_owner():
-    # Semak sama ada hari ini adalah hari terakhir bulan tersebut
     tomorrow = datetime.now(MY_TZ) + timedelta(days=1)
     is_last_day = (tomorrow.day == 1)
 
-    # Hantar Laporan Harian Biasa
     report_text = jana_teks_laporan_harian()
     try:
         bot.send_message(TELEGRAM_CHAT_ID, report_text, parse_mode="Markdown")
         
-        # Jika hari terakhir bulan, hantar juga Laporan Bulanan berasingan secara automatik
         if is_last_day:
             monthly_text = "🚨 **LAPORAN AKHIR BULAN (TOTAL LATE PICK UP & OT)**\n\n" + jana_teks_laporan_bulanan()
             bot.send_message(TELEGRAM_CHAT_ID, monthly_text, parse_mode="Markdown")
@@ -239,8 +236,12 @@ def handle_branch_selection(message):
 def handle_check_in_anak(message):
     branch = user_branches.get(message.chat.id, "Taska 1")
     checked_in_today = active_checkins.get(branch, {})
+    branch_kids = kids_fees.get(branch, {})
     markup = InlineKeyboardMarkup()
-    for name in KIDS_LIST:
+    
+    # Ambil senarai anak dari akaun taska cawangan berkenaan
+    all_kids = list(branch_kids.keys()) if branch_kids else KIDS_LIST
+    for name in all_kids:
         if name in checked_in_today:
             markup.add(InlineKeyboardButton(f"🔴 {name} (Sudah Check-In)", callback_data=f"ignore_{name}"))
         else:
@@ -251,8 +252,11 @@ def handle_check_in_anak(message):
 def handle_check_out_anak(message):
     branch = user_branches.get(message.chat.id, "Taska 1")
     checked_in_today = active_checkins.get(branch, {})
+    branch_kids = kids_fees.get(branch, {})
     markup = InlineKeyboardMarkup()
-    for name in KIDS_LIST:
+    
+    all_kids = list(branch_kids.keys()) if branch_kids else KIDS_LIST
+    for name in all_kids:
         if name in checked_in_today:
             markup.add(InlineKeyboardButton(f"📤 {name} (Check-Out)", callback_data=f"checkout_kid_{name}"))
         else:
@@ -284,7 +288,7 @@ def handle_clock_out_staff(message):
     bot.reply_to(message, f"[{branch}]\nSila pilih nama staff untuk Clock-Out:", reply_markup=markup)
 
 
-# --- CALLBACK QUERY HANDLERS (DENGAN AKUMULASI BULANAN) ---
+# --- CALLBACK QUERY HANDLERS ---
 @bot.callback_query_handler(func=lambda call: call.data.startswith("checkin_kid_"))
 def callback_checkin_kid(call):
     chat_id = call.message.chat.id
@@ -306,7 +310,6 @@ def callback_checkout_kid(call):
     now_dt = datetime.now(MY_TZ)
     now_time = now_dt.strftime("%I:%M %p")
     
-    # Semak Late Pick Up (selepas jam 6:00 PM / 18:00)
     is_late = now_dt.hour >= 18
     checkin_time = active_checkins.get(branch, {}).pop(kid_name, "N/A")
     
@@ -317,7 +320,6 @@ def callback_checkout_kid(call):
     late_text = ""
     if is_late:
         late_text = "\n⚠️ *(Late Pick Up Tercatat!)*"
-        # Masukkan ke dalam akumulasi bulanan (Contoh caj RM 10.00 setiap kali lewat)
         m_kid = monthly_logs[branch]["kids"].setdefault(kid_name, {"count": 0, "total_charge": 0.0})
         m_kid["count"] += 1
         m_kid["total_charge"] += 10.0
@@ -346,7 +348,6 @@ def callback_clockout_staff(call):
     now_dt = datetime.now(MY_TZ)
     now_time = now_dt.strftime("%I:%M %p")
     
-    # Semak OT Staff (selepas jam 6:00 PM / 18:00)
     is_ot = now_dt.hour >= 18
     clockin_time = active_staff_clockin.get(branch, {}).pop(staff_name, "N/A")
     
@@ -357,7 +358,6 @@ def callback_clockout_staff(call):
     ot_text = ""
     if is_ot:
         ot_text = "\n⏳ *(Overtime / OT Tercatat!)*"
-        # Masukkan ke dalam akumulasi bulanan (Contoh OT RM 20.00 setiap kali)
         m_staff = monthly_logs[branch]["staff"].setdefault(staff_name, {"count": 0, "total_ot": 0.0})
         m_staff["count"] += 1
         m_staff["total_ot"] += 20.0
@@ -376,7 +376,7 @@ def semak_owner(message):
 @bot.message_handler(func=lambda message: message.text and "Late Pick Up Charges" in message.text)
 def handle_late_pickup(message):
     if not semak_owner(message): return
-    bot.reply_to(message, "⏱️ **Caj Late Pick Up**: Dikecilkan secara harian dan akan dijumlahkan automatik di dalam **📊 Laporan Bulanan** pada akhir bulan.", parse_mode="Markdown")
+    bot.reply_to(message, "⏱️ **Caj Late Pick Up**: Dikecilkan secara harian dan akan dijumlahkan automatik di dalam **📊 Laporan Bulanan**.", parse_mode="Markdown")
 
 @bot.message_handler(func=lambda message: message.text and "OT Staff" in message.text)
 def handle_ot_staff(message):
@@ -397,14 +397,60 @@ def callback_reg_branch(call):
     user_states[call.message.chat.id] = {"action": "reg_step_name", "branch": branch}
     bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=f"📝 **[{branch}] Pendaftaran Baru**\n\nSila taip **Nama Anak** di bawah:", parse_mode="Markdown")
 
+# --- KELUARKAN ANAK BERHENTI DARI SENARAI ---
 @bot.message_handler(func=lambda message: message.text and "Keluarkan Dari Senarai" in message.text)
 def handle_keluarkan_senarai(message):
     if not semak_owner(message): return
     markup = InlineKeyboardMarkup()
     for b in BRANCHES:
         markup.add(InlineKeyboardButton(f"🏠 {b}", callback_data=f"rem_branch_{b}"))
-    bot.reply_to(message, "❌ Menu Keluarkan Dari Senarai", reply_markup=markup)
+    bot.reply_to(message, "❌ **Menu Keluarkan Dari Senarai**\n\nSila pilih cawangan taska:", parse_mode="Markdown", reply_markup=markup)
 
+@bot.callback_query_handler(func=lambda call: call.data.startswith("rem_branch_"))
+def callback_rem_branch(call):
+    branch = call.data.replace("rem_branch_", "")
+    branch_kids = kids_fees.get(branch, {})
+    markup = InlineKeyboardMarkup()
+    
+    if branch_kids:
+        for name in list(branch_kids.keys()):
+            markup.add(InlineKeyboardButton(f"❌ {name} (Berhenti)", callback_data=f"remove_kid|{branch}|{name}"))
+        bot.edit_message_text(
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            text=f"❌ **[{branch}] Senarai Anak Berdaftar**\n\nSila klik pada nama anak yang ingin dikeluarkan/berhenti:",
+            parse_mode="Markdown",
+            reply_markup=markup
+        )
+    else:
+        bot.edit_message_text(
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            text=f"❌ **[{branch}]** Tiada rekod anak berdaftar untuk dikeluarkan.",
+            parse_mode="Markdown"
+        )
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("remove_kid|"))
+def callback_remove_kid_action(call):
+    parts = call.data.split("|")
+    branch = parts[1]
+    kid_name = parts[2]
+    
+    # Padam anak dari rekod cawangan berkenaan
+    if branch in kids_fees and kid_name in kids_fees[branch]:
+        del kids_fees[branch][kid_name]
+    if kid_name in KIDS_LIST:
+        KIDS_LIST.remove(kid_name)
+        
+    bot.answer_callback_query(call.id, f"{kid_name} telah dikeluarkan!")
+    bot.edit_message_text(
+        chat_id=call.message.chat.id,
+        message_id=call.message.message_id,
+        text=f"✅ **[{branch}]** Nama **{kid_name}** telah berjaya dikeluarkan dari senarai anak berdaftar.",
+        parse_mode="Markdown"
+    )
+
+# --- MENU STATUS & BAYARAN YURAN ---
 @bot.message_handler(func=lambda message: message.text and "Status & Bayaran Yuran" in message.text)
 def handle_status_yuran(message):
     if not semak_owner(message): return
@@ -460,7 +506,7 @@ def callback_input_pay(call):
     bot.answer_callback_query(call.id, f"Taip bayaran untuk {kid_name}")
     bot.send_message(chat_id=call.message.chat.id, text=f"💵 Sila taip **jumlah bayaran (RM)** untuk **{kid_name}**:", parse_mode="Markdown")
 
-# --- HANDLER BUTANG LAPORAN HARIAN & BULANAN ---
+# --- HANDLER BUTANG LAPORAN ---
 @bot.message_handler(func=lambda message: message.text and "Laporan Harian" in message.text)
 def handle_laporan_harian_manual(message):
     if not semak_owner(message): return
