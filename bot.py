@@ -716,7 +716,12 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 conn = get_db_connection()
                 if conn:
                     cur = conn.cursor()
-                    cur.execute("INSERT INTO kids (branch_name, kid_name) VALUES (%s, %s) ON CONFLICT DO NOTHING;", (b_name, k_name))
+                    # Kemaskini cawangan jika nama sudah wujud, atau masukkan baru jika belum ada
+                    cur.execute("""
+                        INSERT INTO kids (branch_name, kid_name) VALUES (%s, %s)
+                        ON CONFLICT (kid_name) 
+                        DO UPDATE SET branch_name = EXCLUDED.branch_name;
+                    """, (b_name, k_name))
                     conn.commit()
                     cur.close()
                     conn.close()
@@ -727,7 +732,7 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 reply_markup = InlineKeyboardMarkup(keyboard)
 
                 await update.message.reply_text(
-                    text=f"✅ *Pendaftaran Berjaya & Disimpan Kekal ke Database!*\n\n"
+                    text=f"✅ *Pendaftaran Berjaya & Dikemaskini ke Database!*\n\n"
                          f"👶 Nama: *{k_name}*\n"
                          f"📍 Cawangan: *{b_name}*\n"
                          f"💰 Jumlah Yuran Rasmi: *RM {fee_val:.2f}*",
