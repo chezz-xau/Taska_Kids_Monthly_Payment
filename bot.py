@@ -13,15 +13,15 @@ from apscheduler.schedulers.background import BackgroundScheduler
 # ==========================================
 # ⚙️ TETAPAN UTAMA & KAWALAN AKSES (ROLES)
 # ==========================================
-TELEGRAM_TOKEN = "8675996323:AAE-TiF1eWxKCPO24t9WeO-Hu57SRjkIq7Q"  # Token Bot Anda
-TELEGRAM_CHAT_ID = "8353544393"                       # Chat ID Owner (Laporan 11 malam & Akhir Bulan)
+TELEGRAM_TOKEN = "8675996323:AAE-TiF1eWxKCPO24t9WeO-Hu57SRjkIq7Q"  # Token Bot Baharu dari BotFather
+TELEGRAM_CHAT_ID = "8353544393"        # Chat ID Owner (Laporan 11 malam & Akhir Bulan)
 
 # Senarai ID Telegram Owner & Staff
-OWNER_IDS = ["8353544393"]               # Masukkan Chat ID Owner di sini
-STAFF_IDS = ["1158219769", "444555666"]      # Masukkan Chat ID Staff di sini
+OWNER_IDS = ["8353544393"]               
+STAFF_IDS = ["111222333", "444555666"]      
 # ==========================================
 
-if not TELEGRAM_TOKEN:
+if not TELEGRAM_TOKEN or "MASUKKAN" in TELEGRAM_TOKEN:
     raise ValueError("Sila masukkan Telegram Token yang sah!")
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
@@ -38,8 +38,8 @@ BRANCHES = ["Taska 1", "Taska 2", "Taska 3"]
 # Simpanan Sesi & Status Kehadiran Semasa
 user_branches = {}
 user_states = {}
-active_checkins = {}      # Format: {"Taska 1": {"Ahmad": "08:15 AM"}}
-active_staff_clockin = {} # Format: {"Taska 1": {"Siti Maryam": "07:45 AM"}}
+active_checkins = {}      
+active_staff_clockin = {} 
 
 # 📜 REKOD SEJARAH HARIAN (DAILY HISTORY LOGS)
 daily_logs = {
@@ -171,25 +171,23 @@ scheduler.add_job(
 scheduler.start()
 
 
-# --- KEYBOARD MENUS (KHUSUS DIBEDAKAN SANGAT KETAT) ---
+# --- KEYBOARD MENUS ---
 def get_main_branch_menu():
     markup = ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
     markup.add(KeyboardButton("🏠 Taska 1"), KeyboardButton("🏠 Taska 2"))
     markup.add(KeyboardButton("🏠 Taska 3"))
     return markup
 
-# Menu KHUSUS Staff (HANYA 4 BUTTON)
 def get_staff_sub_menu():
     markup = ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
     markup.add(KeyboardButton("📥 Check-In Anak"), KeyboardButton("📤 Check-Out Anak"))
     markup.add(KeyboardButton("🟢 Clock-In Staff"), KeyboardButton("🔴 Clock-Out Staff"))
     return markup
 
-# Menu KHUSUS Owner
 def get_owner_sub_menu():
     markup = ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
     markup.add(KeyboardButton("⏱️ Late Pick Up Charges"), KeyboardButton("⌛ OT Staff"))
-    markup.add(KeyboardButton("📝 Pendaftaran Baru Anak-Anak"))
+    markup.add(KeyboardButton("📝 Pendaftaran Baru Anak-Anak"), KeyboardButton("✏️ Edit Masa Manual"))
     markup.add(KeyboardButton("💳 Status & Bayaran Yuran"), KeyboardButton("📊 Laporan Harian"))
     markup.add(KeyboardButton("📊 Laporan Bulanan"), KeyboardButton("❌ Keluarkan Dari Senarai"))
     return markup
@@ -222,8 +220,6 @@ def handle_branch_selection(message):
     branch = message.text.replace("🏠 ", "")
     user_branches[int(message.chat.id)] = branch
     
-    # Hanya Chat ID yang ada di OWNER_IDS yang mendapat menu Owner.
-    # Semua yang lain (termasuk Staff) HANYA mendapatkan menu 4 tombol!
     if chat_id in OWNER_IDS:
         menu_dipilih = get_owner_sub_menu()
         role_teks = "Owner"
@@ -234,7 +230,7 @@ def handle_branch_selection(message):
     bot.reply_to(message, f"Anda telah memilih *{branch}* (Status: {role_teks}).\nSila pilih menu tindakan di bawah:", parse_mode="Markdown", reply_markup=menu_dipilih)
 
 
-# --- HANDLER CHECK-IN/OUT (DAPAT DIAKSES STAFF & OWNER) ---
+# --- HANDLER CHECK-IN/OUT ---
 @bot.message_handler(func=lambda message: message.text and "Check-In Anak" in message.text)
 def handle_check_in_anak(message):
     branch = user_branches.get(message.chat.id, "Taska 1")
@@ -368,12 +364,82 @@ def callback_clockout_staff(call):
     bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text=f"🔴 [{branch}] **{staff_name}** Clock-Out jam **{now_time}**!{ot_text}", parse_mode="Markdown")
 
 
-# --- HANDLER KHAS OWNER (TIDAK BISA DIAKSES STAFF) ---
+# --- HANDLER KHAS OWNER ---
 def semak_owner(message):
     if str(message.chat.id) not in OWNER_IDS:
         bot.reply_to(message, "⚠️ Maaf, menu ini hanya boleh diakses oleh Owner Taska sahaja.")
         return False
     return True
+
+# --- FUNGSI EDIT MASA MANUAL (OWNER ONLY) ---
+@bot.message_handler(func=lambda message: message.text and "Edit Masa Manual" in message.text)
+def handle_edit_manual_menu(message):
+    if not semak_owner(message): return
+    markup = InlineKeyboardMarkup()
+    markup.add(
+        InlineKeyboardButton("👶 Edit Masa Anak", callback_data="edit_cat_kids"),
+        InlineKeyboardButton("👤 Edit Masa Staff", callback_data="edit_cat_staff")
+    )
+    bot.reply_to(message, "✏️ **Menu Edit Masa Manual**\n\nSila pilih kategori yang ingin dikemaskini:", parse_mode="Markdown", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("edit_cat_"))
+def callback_edit_cat(call):
+    category = call.data.replace("edit_cat_", "")
+    markup = InlineKeyboardMarkup()
+    for b in BRANCHES:
+        markup.add(InlineKeyboardButton(f"🏠 {b}", callback_data=f"edit_branch|{category}|{b}"))
+    bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=f"✏️ **Edit Masa [{category.upper()}]**\n\nSila pilih cawangan:", parse_mode="Markdown", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("edit_branch|"))
+def callback_edit_branch(call):
+    parts = call.data.split("|")
+    category, branch = parts[1], parts[2]
+    markup = InlineKeyboardMarkup()
+    
+    if category == "kids":
+        branch_kids = kids_fees.get(branch, {})
+        names = list(branch_kids.keys()) if branch_kids else KIDS_LIST
+    else:
+        names = STAFF_LIST
+
+    for name in names:
+        markup.add(InlineKeyboardButton(f"👤 {name}", callback_data=f"edit_name|{category}|{branch}|{name}"))
+        
+    bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=f"✏️ **[{branch}] Edit Masa {category.capitalize()}**\n\nSila pilih nama:", parse_mode="Markdown", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("edit_name|"))
+def callback_edit_name(call):
+    parts = call.data.split("|")
+    category, branch, name = parts[1], parts[2], parts[3]
+    markup = InlineKeyboardMarkup()
+    
+    in_label = "📥 Masa Check-In" if category == "kids" else "🟢 Masa Clock-In"
+    out_label = "📤 Masa Check-Out" if category == "kids" else "🔴 Masa Clock-Out"
+    
+    markup.add(
+        InlineKeyboardButton(in_label, callback_data=f"edit_type|{category}|{branch}|{name}|in"),
+        InlineKeyboardButton(out_label, callback_data=f"edit_type|{category}|{branch}|{name}|out")
+    )
+    bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=f"✏️ Edit masa untuk **{name}** ({branch}):\nSila pilih jenis rekod:", parse_mode="Markdown", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("edit_type|"))
+def callback_edit_type(call):
+    parts = call.data.split("|")
+    category, branch, name, io_type = parts[1], parts[2], parts[3], parts[4]
+    chat_id = call.message.chat.id
+    
+    user_states[chat_id] = {
+        "action": "input_manual_time",
+        "category": category,
+        "branch": branch,
+        "name": name,
+        "io_type": io_type
+    }
+    
+    type_str = "Check-In / Clock-In" if io_type == "in" else "Check-Out / Clock-Out"
+    bot.answer_callback_query(call.id, f"Sila taip masa {type_str}")
+    bot.send_message(chat_id=chat_id, text=f"✏️ Sila taip masa **{type_str}** baharu untuk **{name}** di bawah:\n*(Contoh format: 08:15 AM atau 05:30 PM)*", parse_mode="Markdown")
+
 
 @bot.message_handler(func=lambda message: message.text and "Late Pick Up Charges" in message.text)
 def handle_late_pickup(message):
@@ -510,6 +576,28 @@ def handle_all_text_inputs(message):
     if chat_id in user_states:
         action = user_states[chat_id].get("action")
         
+        # ALIRAN INPUT MASA MANUAL
+        if action == "input_manual_time":
+            state = user_states.pop(chat_id)
+            cat = state["category"]
+            branch = state["branch"]
+            name = state["name"]
+            io_type = state["io_type"]
+            
+            # Kemaskini rekod harian
+            daily_logs[branch][cat].setdefault(name, {})[io_type] = text
+            type_str = "Check-In / Clock-In" if io_type == "in" else "Check-Out / Clock-Out"
+            
+            bot.reply_to(
+                message,
+                f"✅ **[{branch}] Masa Berjaya Dikemaskini!**\n\n"
+                f"👤 **Nama:** {name}\n"
+                f"⏱️ **{type_str}:** {text}",
+                parse_mode="Markdown",
+                reply_markup=get_owner_sub_menu()
+            )
+            return
+
         if action == "reg_step_name":
             user_states[chat_id]["kid_name"] = text
             user_states[chat_id]["action"] = "reg_step_parent"
@@ -554,7 +642,6 @@ def handle_all_text_inputs(message):
                 bot.reply_to(message, "⚠️ Sila masukkan nombor bayaran yang sah.")
             return
 
-    # Pastikan saat mengetik teks sembarang, tombol yang muncul tetap sesuai role
     menu_aktif = get_owner_sub_menu() if str(chat_id) in OWNER_IDS else get_staff_sub_menu()
     bot.reply_to(message, "Sila gunakan butang menu di bawah:", reply_markup=menu_aktif)
 
