@@ -159,7 +159,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text=staff_text, reply_markup=reply_markup, parse_mode="Markdown"
         )
 
-    # 1. OWNER PILIH CAWANAGAN UNTUK REGISTER ANAK
+    # 1. OWNER PILIH CAWANGAN UNTUK REGISTER ANAK
     elif data == "owner_select_branch_register":
         keyboard = [
             [InlineKeyboardButton(f"🏢 {branch}", callback_data=f"reg_br_{branch}")]
@@ -177,7 +177,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("reg_br_"):
         branch_name = data.replace("reg_br_", "")
         user_sessions[user_id] = {
-            "mode": "register_kid",
+            "mode": "register_kid_name",
             "branch": branch_name
         }
         await query.edit_message_text(
@@ -185,7 +185,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
 
-    # 3. OWNER PILIH CAWANAGAN UNTUK YURAN
+    # 3. OWNER PILIH CAWANGAN UNTUK YURAN
     elif data == "owner_select_branch_yuran":
         keyboard = [
             [InlineKeyboardButton(f"🏢 {branch}", callback_data=f"yuran_br_{branch}")]
@@ -226,9 +226,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parts = data.split("_", 3)
         branch_name, kid_name = parts[2], parts[3]
 
-        info = db_yuran.get(kid_name, {"yuran": 350.0, "bayar": 0.0})
+        info = db_yuran.get(kid_name, {"yuran": 0.0, "bayar": 0.0})
         baki = info["yuran"] - info["bayar"]
-        status = "Lunas ✅" if baki <= 0 else "Belum Lunas ❌"
+        status = "Lunas ✅" if baki <= 0 and info["yuran"] > 0 else "Belum Lunas ❌"
 
         text_detail = (
             f"💳 *Status & Bayaran Yuran*\n"
@@ -451,31 +451,55 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
         mode = session.get("mode")
         now = datetime.now(MY_TZ)
 
-        # A. PENDAFTARAN NAMA ANAK BAHARU
-        if mode == "register_kid":
+        # STEP A: TERIMA NAMA ANAK -> MINTA JUMLAH YURAN
+        if mode == "register_kid_name":
             branch_name = session["branch"]
             new_kid_name = input_text
 
-            if branch_name not in dynamic_kids:
-                dynamic_kids[branch_name] = []
-            
-            dynamic_kids[branch_name].append(new_kid_name)
-            db_yuran[new_kid_name] = {"yuran": 350.0, "bayar": 0.0}  # Set yuran default
-
-            keyboard = [[InlineKeyboardButton("👑 Dashboard Owner", callback_data="owner_main_menu")]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
+            # Simpan nama dan tukar mode ke register_kid_fee
+            user_sessions[user_id] = {
+                "mode": "register_kid_fee",
+                "branch": branch_name,
+                "kid_name": new_kid_name
+            }
 
             await update.message.reply_text(
-                text=f"✅ *Pendaftaran Anak Baharu Berjaya!*\n\n"
-                     f"👶 Nama: *{new_kid_name}*\n"
-                     f"📍 Cawangan: *{branch_name}*\n"
-                     f"💰 Yuran Standar: *RM 350.00*\n\n"
-                     f"Nama ini telah dimasukkan ke dalam senarai cawangan secara automatik!",
-                reply_markup=reply_markup,
+                text=f"💰 *Masukkan Jumlah Yuran Bulanan*\n\nSila taip **jumlah yuran rasmi (RM)** untuk *{new_kid_name}*:\n*(Contoh: 350 atau 400)*",
                 parse_mode="Markdown"
             )
+            return
 
-        # B. TAIPAN MASA MANUAL
+        # STEP B: TERIMA JUMLAH YURAN -> SIMPAN & PAPARAN RESIT
+        elif mode == "register_kid_fee":
+            try:
+                fee_val = float(input_text.replace("RM", "").strip())
+                branch_name = session["branch"]
+                new_kid_name = session["kid_name"]
+
+                if branch_name not in dynamic_kids:
+                    dynamic_kids[branch_name] = []
+
+                dynamic_kids[branch_name].append(new_kid_name)
+                db_yuran[new_kid_name] = {"yuran": fee_val, "bayar": 0.0}
+
+                keyboard = [[InlineKeyboardButton("👑 Dashboard Owner", callback_data="owner_main_menu")]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+
+                await update.message.reply_text(
+                    text=f"✅ *Pendaftaran Anak Baharu Berjaya!*\n\n"
+                         f"👶 Nama: *{new_kid_name}*\n"
+                         f"📍 Cawangan: *{branch_name}*\n"
+                         f"💰 Yuran Bulanan: *RM {fee_val:.2f}*\n\n"
+                         f"Maklumat ini telah dimasukkan ke dalam senarai cawangan secara automatik!",
+                    reply_markup=reply_markup,
+                    parse_mode="Markdown"
+                )
+                del user_sessions[user_id]
+            except ValueError:
+                await update.message.reply_text("⚠️ Sila taip nombor yuran sahaja (contoh: `350` atau `400`).")
+                return
+
+        # TAIPAN MASA MANUAL
         elif mode == "manual_time":
             action_text = "Check-In Anak" if session["action"] == "in" else "Check-Out Anak"
             keyboard = [[InlineKeyboardButton("🔙 Menu Anak", callback_data=f"menu_kids_{session['branch']}")]]
@@ -491,8 +515,9 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 reply_markup=reply_markup,
                 parse_mode="Markdown",
             )
+            del user_sessions[user_id]
 
-        # C. KEMASKINI BAYARAN
+        # KEMASKINI BAYARAN
         elif mode == "update_pay":
             try:
                 pay_val = float(input_text.replace("RM", "").strip())
@@ -500,12 +525,12 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 branch_name = session["branch"]
 
                 if kid_name not in db_yuran:
-                    db_yuran[kid_name] = {"yuran": 350.0, "bayar": 0.0}
+                    db_yuran[kid_name] = {"yuran": 0.0, "bayar": 0.0}
 
                 db_yuran[kid_name]["bayar"] = pay_val
                 info = db_yuran[kid_name]
                 baki = info["yuran"] - info["bayar"]
-                status = "Lunas ✅" if baki <= 0 else "Belum Lunas ❌"
+                status = "Lunas ✅" if baki <= 0 and info["yuran"] > 0 else "Belum Lunas ❌"
 
                 keyboard = [[InlineKeyboardButton("💳 Kembali ke Rekod Yuran", callback_data=f"yuran_kid_{branch_name}_{kid_name}")]]
                 reply_markup = InlineKeyboardMarkup(keyboard)
@@ -519,11 +544,12 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     reply_markup=reply_markup,
                     parse_mode="Markdown"
                 )
+                del user_sessions[user_id]
             except ValueError:
                 await update.message.reply_text("⚠️ Sila taip nombor sahaja (contoh: `100` atau `350`).")
                 return
 
-        # D. KEMASKINI SET TOTAL YURAN
+        # KEMASKINI SET TOTAL YURAN
         elif mode == "update_fee":
             try:
                 fee_val = float(input_text.replace("RM", "").strip())
@@ -545,11 +571,10 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     reply_markup=reply_markup,
                     parse_mode="Markdown"
                 )
+                del user_sessions[user_id]
             except ValueError:
                 await update.message.reply_text("⚠️ Sila taip nombor sahaja (contoh: `350` atau `400`).")
                 return
-
-        del user_sessions[user_id]
 
 # ---------------------------------------------------------
 # 4. MAIN PROGRAM
