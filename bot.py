@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 MY_TZ = pytz.timezone("Asia/Kuala_Lumpur")
 
 # ---------------------------------------------------------
-# 1. FLASK HEARTBEAT (SUPAYA RENDER FREE TIER TIDAK SLEEP)
+# 1. FLASK HEARTBEAT
 # ---------------------------------------------------------
 app_web = Flask("")
 
@@ -39,7 +39,7 @@ def run_web():
 Thread(target=run_web, daemon=True).start()
 
 # ---------------------------------------------------------
-# 2. ENVIRONMENT VARIABLES FROM RENDER
+# 2. ENVIRONMENT VARIABLES & SIMPANAN STATUS
 # ---------------------------------------------------------
 TOKEN = os.environ.get("TELEGRAM_TOKEN", "").strip()
 
@@ -54,21 +54,24 @@ BRANCHES = [
     if b.strip()
 ]
 
-# Database dinamik sementara untuk simpan senarai anak yang baru didaftarkan
+# Database Sementara
 dynamic_kids = {}
+ot_staff_db = {}
+db_yuran = {}
+user_sessions = {}
+
+# Rekod Status Kehadiran Harian: {"Ahmad": {"status": "in", "time": "08:15 AM"}}
+attendance_status = {}
 
 def get_kids_for_branch(branch_name: str):
     clean_name = branch_name.upper().replace(" ", "_")
     kids_raw = os.environ.get(f"KIDS_{clean_name}", "")
     base_list = [k.strip() for k in kids_raw.split(",") if k.strip()] if kids_raw else []
     
-    # Gabungkan dengan nama anak yang baru ditambah secara dinamik
     extra_kids = dynamic_kids.get(branch_name, [])
-    return list(set(base_list + extra_kids))
-
-# Data Simpanan Sementara (In-Memory Database)
-user_sessions = {}
-db_yuran = {}  # Format: {"Ahmad": {"yuran": 350, "bayar": 100}}
+    all_kids = list(set(base_list + extra_kids))
+    removed = dynamic_kids.get(f"removed_{branch_name}", [])
+    return [k for k in all_kids if k not in removed]
 
 # ---------------------------------------------------------
 # 3. HANDLERS / FUNGSI BOT
@@ -126,162 +129,94 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "owner_attendance_kids":
         keyboard = [[InlineKeyboardButton("🔙 Kembali", callback_data="owner_menu_kehadiran")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        report_text = (
-            "👶 *Laporan Kehadiran Anak (Harian)*\n"
-            "───────────────────────\n"
-            "👤 *Nama Anak:* Ahmad\n"
-            "📥 Check-In: `08:15 AM`\n"
-            "📤 Check-Out: `05:30 PM`\n"
-            "───────────────────────\n"
-            "👤 *Nama Anak:* Ali\n"
-            "📥 Check-In: `08:30 AM`\n"
-            "📤 Check-Out: `Belum Keluar`\n"
-        )
-        await query.edit_message_text(
-            text=report_text, reply_markup=reply_markup, parse_mode="Markdown"
-        )
+        
+        report_text = "👶 *Laporan Kehadiran Anak (Harian)*\n───────────────────────\n"
+        if not attendance_status:
+            report_text += "⚠️ Belum ada rekod kehadiran hari ini."
+        else:
+            for name, rec in attendance_status.items():
+                st_icon = "🔴 Checked-In" if rec["status"] == "in" else "⚪ Checked-Out"
+                report_text += f"👤 *{name}*: {st_icon} (`{rec['time']}`)\n"
+                
+        await query.edit_message_text(text=report_text, reply_markup=reply_markup, parse_mode="Markdown")
 
     elif data == "owner_attendance_staff":
         keyboard = [[InlineKeyboardButton("🔙 Kembali", callback_data="owner_menu_kehadiran")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        staff_text = (
-            "👩‍🏫 *Rekod Jam Kerja Staff (Harian)*\n"
-            "───────────────────────\n"
-            "👤 *Staff:* Cikgu Siti\n"
-            "🟢 Clock-In: `07:50 AM`\n"
-            "🔴 Clock-Out: `06:00 PM`\n"
-            "───────────────────────\n"
-            "👤 *Staff:* Cikgu Aminah\n"
-            "🟢 Clock-In: `08:05 AM`\n"
-            "🔴 Clock-Out: `Belum Keluar`\n"
-        )
-        await query.edit_message_text(
-            text=staff_text, reply_markup=reply_markup, parse_mode="Markdown"
-        )
+        await query.edit_message_text(text="👩‍🏫 *Rekod Jam Kerja Staff (Harian)*", reply_markup=reply_markup, parse_mode="Markdown")
 
-    # 1. OWNER PILIH CAWANGAN UNTUK REGISTER ANAK
     elif data == "owner_select_branch_register":
-        keyboard = [
-            [InlineKeyboardButton(f"🏢 {branch}", callback_data=f"reg_br_{branch}")]
-            for branch in BRANCHES
-        ]
+        keyboard = [[InlineKeyboardButton(f"🏢 {branch}", callback_data=f"reg_br_{branch}")] for branch in BRANCHES]
         keyboard.append([InlineKeyboardButton("🔙 Kembali", callback_data="owner_main_menu")])
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(
-            text="📝 *Pendaftaran Baru Anak-Anak*\n\nSila pilih cawangan untuk pendaftaran:",
-            reply_markup=reply_markup,
-            parse_mode="Markdown"
-        )
+        await query.edit_message_text(text="📝 *Pendaftaran Baru Anak-Anak*", reply_markup=reply_markup, parse_mode="Markdown")
 
-    # 2. OWNER TAIP NAMA ANAK BAHARU
     elif data.startswith("reg_br_"):
         branch_name = data.replace("reg_br_", "")
-        user_sessions[user_id] = {
-            "mode": "register_kid_name",
-            "branch": branch_name
-        }
-        await query.edit_message_text(
-            text=f"📝 *Pendaftaran Baru Anak-Anak* ({branch_name})\n\nSila taip **nama penuh anak baharu** di bawah:\n*(Contoh: Muhammad Ali)*",
-            parse_mode="Markdown"
-        )
+        user_sessions[user_id] = {"mode": "register_kid_name", "branch": branch_name}
+        await query.edit_message_text(text=f"📝 *Pendaftaran Baru* ({branch_name})\n\nTaip nama anak baharu:", parse_mode="Markdown")
 
-    # 3. OWNER PILIH CAWANGAN UNTUK YURAN
     elif data == "owner_select_branch_yuran":
-        keyboard = [
-            [InlineKeyboardButton(f"🏢 {branch}", callback_data=f"yuran_br_{branch}")]
-            for branch in BRANCHES
-        ]
+        keyboard = [[InlineKeyboardButton(f"🏢 {branch}", callback_data=f"yuran_br_{branch}")] for branch in BRANCHES]
         keyboard.append([InlineKeyboardButton("🔙 Kembali", callback_data="owner_main_menu")])
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(
-            text="💳 *Pengurusan Yuran*\n\nSila pilih cawangan:",
-            reply_markup=reply_markup,
-            parse_mode="Markdown"
-        )
+        await query.edit_message_text(text="💳 *Pengurusan Yuran*", reply_markup=reply_markup, parse_mode="Markdown")
 
-    # 4. OWNER PILIH NAMA ANAK UNTUK YURAN
     elif data.startswith("yuran_br_"):
         branch_name = data.replace("yuran_br_", "")
         kids_list = get_kids_for_branch(branch_name)
-
         keyboard = []
         if kids_list:
             for kid in kids_list:
-                keyboard.append([
-                    InlineKeyboardButton(f"👤 {kid}", callback_data=f"yuran_kid_{branch_name}_{kid}")
-                ])
+                keyboard.append([InlineKeyboardButton(f"👤 {kid}", callback_data=f"yuran_kid_{branch_name}_{kid}")])
         else:
             keyboard.append([InlineKeyboardButton("⚠️ Tiada senarai anak", callback_data="none")])
-
         keyboard.append([InlineKeyboardButton("🔙 Kembali", callback_data="owner_select_branch_yuran")])
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(
-            text=f"💳 *Pilih Anak untuk Kemaskini Yuran* ({branch_name}):",
-            reply_markup=reply_markup,
-            parse_mode="Markdown"
-        )
+        await query.edit_message_text(text=f"💳 *Pilih Anak* ({branch_name}):", reply_markup=reply_markup, parse_mode="Markdown")
 
-    # 5. PAPARAN STATUS YURAN ANAK
     elif data.startswith("yuran_kid_"):
         parts = data.split("_", 3)
         branch_name, kid_name = parts[2], parts[3]
-
         info = db_yuran.get(kid_name, {"yuran": 0.0, "bayar": 0.0})
         baki = info["yuran"] - info["bayar"]
         status = "Lunas ✅" if baki <= 0 and info["yuran"] > 0 else "Belum Lunas ❌"
 
         text_detail = (
-            f"💳 *Status & Bayaran Yuran*\n"
-            f"───────────────────────\n"
-            f"1. *Nama Anak:* {kid_name}\n"
-            f"2. *Jumlah Yuran:* RM {info['yuran']:.2f}\n"
-            f"3. *Bayaran Hari Ini/Terkini:* RM {info['bayar']:.2f}\n"
-            f"4. *Baki:* RM {max(0, baki):.2f}\n"
-            f"5. *Status:* {status}\n"
-            f"───────────────────────"
+            f"💳 *Status Yuran*: {kid_name}\n"
+            f"• Yuran: RM {info['yuran']:.2f}\n"
+            f"• Bayaran: RM {info['bayar']:.2f}\n"
+            f"• Baki: RM {max(0, baki):.2f}\n"
+            f"• Status: {status}"
         )
-
         keyboard = [
-            [InlineKeyboardButton("💵 Kemaskini Bayaran Hari Ini", callback_data=f"pay_update_{branch_name}_{kid_name}")],
-            [InlineKeyboardButton("✏️ Set Jumlah Yuran", callback_data=f"fee_update_{branch_name}_{kid_name}")],
+            [InlineKeyboardButton("💵 Kemaskini Bayaran", callback_data=f"pay_update_{branch_name}_{kid_name}")],
+            [InlineKeyboardButton("✏️ Set Yuran Bulanan", callback_data=f"fee_update_{branch_name}_{kid_name}")],
             [InlineKeyboardButton("🔙 Kembali", callback_data=f"yuran_br_{branch_name}")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(
-            text=text_detail,
-            reply_markup=reply_markup,
-            parse_mode="Markdown"
-        )
+        await query.edit_message_text(text=text_detail, reply_markup=reply_markup, parse_mode="Markdown")
 
     elif data.startswith("pay_update_"):
         parts = data.split("_", 3)
-        branch_name, kid_name = parts[2], parts[3]
-
-        user_sessions[user_id] = {
-            "mode": "update_pay",
-            "branch": branch_name,
-            "kid": kid_name
-        }
-
-        await query.edit_message_text(
-            text=f"💵 *Masukkan Jumlah Bayaran Hari Ini*\n\nSila taip jumlah bayaran baharu untuk *{kid_name}* dalam RM:\n*(Contoh: 100 atau 350)*",
-            parse_mode="Markdown"
-        )
+        user_sessions[user_id] = {"mode": "update_pay", "branch": parts[2], "kid": parts[3]}
+        await query.edit_message_text(text=f"💵 Taip bayaran baharu untuk *{parts[3]}*:", parse_mode="Markdown")
 
     elif data.startswith("fee_update_"):
         parts = data.split("_", 3)
+        user_sessions[user_id] = {"mode": "update_fee", "branch": parts[2], "kid": parts[3]}
+        await query.edit_message_text(text=f"✏️ Taip yuran bulanan rasmi untuk *{parts[3]}*:", parse_mode="Markdown")
+
+    elif data.startswith("del_kid_"):
+        parts = data.split("_", 3)
         branch_name, kid_name = parts[2], parts[3]
-
-        user_sessions[user_id] = {
-            "mode": "update_fee",
-            "branch": branch_name,
-            "kid": kid_name
-        }
-
-        await query.edit_message_text(
-            text=f"✏️ *Tetapkan Jumlah Yuran Bulanan*\n\nSila taip jumlah yuran rasmi untuk *{kid_name}* dalam RM:\n*(Contoh: 350 atau 400)*",
-            parse_mode="Markdown"
-        )
+        key_rem = f"removed_{branch_name}"
+        if key_rem not in dynamic_kids:
+            dynamic_kids[key_rem] = []
+        dynamic_kids[key_rem].append(kid_name)
+        keyboard = [[InlineKeyboardButton("🔙 Senarai Cawangan", callback_data="owner_main_menu")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(text=f"❌ *{kid_name}* dikeluarkan dari senarai.", reply_markup=reply_markup, parse_mode="Markdown")
 
     elif data == "owner_main_menu":
         keyboard = [
@@ -290,14 +225,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("📝 Pendaftaran Baru Anak-Anak", callback_data="owner_select_branch_register")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(
-            text="👑 *Dashboard Pengurusan (Owner/Admin)*\n\nSila pilih kategori pengurusan:",
-            reply_markup=reply_markup,
-            parse_mode="Markdown",
-        )
+        await query.edit_message_text(text="👑 *Dashboard Owner*", reply_markup=reply_markup, parse_mode="Markdown")
 
     # ==========================================
-    # 👩‍🏫 SUB-MENU STAFF / CIKGU
+    # 👩‍🏫 SUB-MENU STAFF / CIKGU (DENGAN WARNA MERAH & KUNCI REKOD)
     # ==========================================
     elif data.startswith("branch_"):
         branch_name = data.replace("branch_", "")
@@ -307,11 +238,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🔙 Kembali", callback_data="back_to_branches")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(
-            text=f"📍 Cawangan: *{branch_name}*\n\nSila pilih kategori:",
-            reply_markup=reply_markup,
-            parse_mode="Markdown",
-        )
+        await query.edit_message_text(text=f"📍 Cawangan: *{branch_name}*", reply_markup=reply_markup, parse_mode="Markdown")
 
     elif data.startswith("menu_kids_"):
         branch_name = data.replace("menu_kids_", "")
@@ -323,12 +250,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🔙 Kembali", callback_data=f"branch_{branch_name}")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(
-            text=f"👶 *Pengurusan Anak-Anak* ({branch_name}):",
-            reply_markup=reply_markup,
-            parse_mode="Markdown",
-        )
+        await query.edit_message_text(text=f"👶 *Pengurusan Anak-Anak* ({branch_name}):", reply_markup=reply_markup, parse_mode="Markdown")
 
+    # PAPARAN SENARAI ANAK DENGAN WARNA MERAH JIKA SUDAH CHECK-IN[span_2](start_span)[span_2](end_span)
     elif data.startswith("list_in_") or data.startswith("list_out_"):
         action = "in" if "list_in_" in data else "out"
         branch_name = data.replace("list_in_", "").replace("list_out_", "")
@@ -338,24 +262,44 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = []
         if kids_list:
             for kid in kids_list:
-                keyboard.append([
-                    InlineKeyboardButton(f"👤 {kid}", callback_data=f"kidselect_{action}_{branch_name}_{kid}")
-                ])
+                status_rec = attendance_status.get(kid, {})
+                current_st = status_rec.get("status", "out")
+                
+                # Tanda MERAH 🔴 jika sudah Check-In
+                if current_st == "in":
+                    btn_label = f"🔴 {kid} (Sudah Check-In)"
+                else:
+                    btn_label = f"👤 {kid}"
+
+                keyboard.append([InlineKeyboardButton(btn_label, callback_data=f"kidselect_{action}_{branch_name}_{kid}")])
         else:
             keyboard.append([InlineKeyboardButton("⚠️ Tiada senarai anak", callback_data="none")])
 
         keyboard.append([InlineKeyboardButton("🔙 Kembali", callback_data=f"menu_kids_{branch_name}")])
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(
-            text=f"👶 *Pilih Nama Anak untuk {action_label}* ({branch_name}):",
-            reply_markup=reply_markup,
-            parse_mode="Markdown",
-        )
+        await query.edit_message_text(text=f"👶 *Pilih Nama Anak untuk {action_label}* ({branch_name}):", reply_markup=reply_markup, parse_mode="Markdown")
 
+    # KAWALAN HALANGAN CHECK-IN 2 KALI
     elif data.startswith("kidselect_"):
         parts = data.split("_", 3)
         action, branch_name, kid_name = parts[1], parts[2], parts[3]
         action_text = "Check-In" if action == "in" else "Check-Out"
+
+        current_rec = attendance_status.get(kid_name, {})
+        current_st = current_rec.get("status", "out")
+
+        # SEKATAN CHECK-IN DUA KALI
+        if action == "in" and current_st == "in":
+            keyboard = [[InlineKeyboardButton("🔙 Kembali", callback_data=f"list_in_{branch_name}")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(
+                text=f"🛑 *AMARAN: CHECK-IN DIBLOK!*\n\n"
+                     f"🔴 *{kid_name}* sudah pun Check-In pada jam *{current_rec.get('time', '-') }*!\n\n"
+                     f"Tidak boleh buat Check-In kali kedua.",
+                reply_markup=reply_markup,
+                parse_mode="Markdown"
+            )
+            return
 
         keyboard = [
             [InlineKeyboardButton("⚡ Guna Masa Sekarang (Auto)", callback_data=f"kidact_auto_{action}_{branch_name}_{kid_name}")],
@@ -364,7 +308,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(
-            text=f"👶 *Pilihan Masa {action_text}*\n\nNama: *{kid_name}*\nCawangan: *{branch_name}*\n\nSila pilih kaedah penandaan masa:",
+            text=f"👶 *Pilihan Masa {action_text}*\n\nNama: *{kid_name}*\nCawangan: *{branch_name}*",
             reply_markup=reply_markup,
             parse_mode="Markdown",
         )
@@ -373,7 +317,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parts = data.split("_", 4)
         action, branch_name, kid_name = parts[2], parts[3], parts[4]
         now = datetime.now(MY_TZ)
+        time_str = now.strftime('%I:%M %p')
         action_text = "Check-In Anak" if action == "in" else "Check-Out Anak"
+
+        # Kemaskini Status Kehadiran
+        attendance_status[kid_name] = {"status": action, "time": time_str}
 
         keyboard = [[InlineKeyboardButton("🔙 Menu Anak", callback_data=f"menu_kids_{branch_name}")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -381,8 +329,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text=f"✅ *Rekod Berjaya Disimpan (Auto)!*\n\n"
                  f"👶 Nama: *{kid_name}*\n"
                  f"📍 Cawangan: *{branch_name}*\n"
-                 f"📝 Jenis: *{action_text}*\n"
-                 f"⏰ Masa: *{now.strftime('%I:%M %p')}*\n"
+                 f"📝 Status: *{'🔴 Check-In' if action=='in' else '⚪ Check-Out'}*\n"
+                 f"⏰ Masa: *{time_str}*\n"
                  f"📅 Tarikh: *{now.strftime('%d/%m/%Y')}*",
             reply_markup=reply_markup,
             parse_mode="Markdown",
@@ -390,191 +338,136 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data.startswith("kidact_manual_"):
         parts = data.split("_", 4)
-        action, branch_name, kid_name = parts[2], parts[3], parts[4]
-
         user_sessions[user_id] = {
             "mode": "manual_time",
-            "action": action,
-            "branch": branch_name,
-            "kid": kid_name,
+            "action": parts[2],
+            "branch": parts[3],
+            "kid": parts[4],
         }
-
-        await query.edit_message_text(
-            text=f"✏️ *Edit Masa Manual*\n\nSila taip masa *Check-In/Out* baharu untuk *{kid_name}* di bawah:\n*(Contoh format: 08:15 AM atau 05:30 PM)*",
-            parse_mode="Markdown",
-        )
+        await query.edit_message_text(text=f"✏️ *Edit Masa Manual* untuk *{parts[4]}*:\n*(Contoh: 08:15 AM)*", parse_mode="Markdown")
 
     elif data == "back_to_branches":
         keyboard = [[InlineKeyboardButton(f"🏢 {branch}", callback_data=f"branch_{branch}")] for branch in BRANCHES]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(
-            text="👋 *Sistem Pengurusan Taska*\n\nSila pilih cawangan di bawah:",
-            reply_markup=reply_markup,
-            parse_mode="Markdown",
-        )
+        await query.edit_message_text(text="👋 *Sistem Pengurusan Taska*", reply_markup=reply_markup, parse_mode="Markdown")
 
-# FUNGSI MENERIMA MESEJ TAIPAN (TEXT & REPLIES)
+# ---------------------------------------------------------
+# FUNGSI MENERIMA MESEJ TAIPAN
+# ---------------------------------------------------------
 async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     input_text = update.message.text.strip()
+    now = datetime.now(MY_TZ)
 
-    # 1. RESPONSE UNTUK BUTANG MENU BAWAH (REPLY KEYBOARD)
-    if "Pendaftaran Baru" in input_text:
-        keyboard = [
-            [InlineKeyboardButton(f"🏢 {branch}", callback_data=f"reg_br_{branch}")]
-            for branch in BRANCHES
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(
-            "📝 *Pendaftaran Baru Anak-Anak*\n\nSila pilih cawangan di bawah:",
-            reply_markup=reply_markup,
-            parse_mode="Markdown"
-        )
+    if "Late Pick Up" in input_text:
+        await update.message.reply_text("⏱️ *Kiraan Denda Lewat Pick-Up*: RM 10.00 / 30 Minit selepas 06:00 PM.", parse_mode="Markdown")
         return
 
-    elif "Status & Bayaran Yuran" in input_text or "Yuran" in input_text:
-        keyboard = [
-            [InlineKeyboardButton(f"🏢 {branch}", callback_data=f"yuran_br_{branch}")]
-            for branch in BRANCHES
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(
-            "💳 *Pengurusan Yuran*\n\nSila pilih cawangan:",
-            reply_markup=reply_markup,
-            parse_mode="Markdown"
-        )
+    elif "OT Staff" in input_text:
+        user_sessions[user_id] = {"mode": "input_ot"}
+        await update.message.reply_text("⏳ Taip nama staff dan jumlah jam OT (Contoh: Cikgu Siti - 2 Jam):", parse_mode="Markdown")
         return
 
-    # 2. SEKSYEN PENANGAN SESI (SESSION HANDLING)
+    elif "Pendaftaran Baru" in input_text:
+        keyboard = [[InlineKeyboardButton(f"🏢 {branch}", callback_data=f"reg_br_{branch}")] for branch in BRANCHES]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text("📝 *Pendaftaran Baru Anak-Anak*:", reply_markup=reply_markup, parse_mode="Markdown")
+        return
+
+    elif "Edit Masa Manual" in input_text:
+        keyboard = [[InlineKeyboardButton(f"🏢 {branch}", callback_data=f"branch_{branch}")] for branch in BRANCHES]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text("✏️ Pilih cawangan untuk edit masa manual:", reply_markup=reply_markup, parse_mode="Markdown")
+        return
+
+    elif "Status & Bayaran Yuran" in input_text:
+        keyboard = [[InlineKeyboardButton(f"🏢 {branch}", callback_data=f"yuran_br_{branch}")] for branch in BRANCHES]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text("💳 *Pengurusan Yuran*:", reply_markup=reply_markup, parse_mode="Markdown")
+        return
+
+    elif "Laporan Harian" in input_text:
+        keyboard = [
+            [InlineKeyboardButton("📋 Kehadiran Anak", callback_data="owner_attendance_kids")],
+            [InlineKeyboardButton("👩‍🏫 Kehadiran Staff", callback_data="owner_attendance_staff")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text(f"📊 *Ringkasan Laporan Harian* ({now.strftime('%d/%m/%Y')}):", reply_markup=reply_markup, parse_mode="Markdown")
+        return
+
+    elif "Laporan Bulanan" in input_text:
+        total_kutipan = sum([v.get("bayar", 0.0) for v in db_yuran.values()])
+        await update.message.reply_text(f"📊 *Laporan Bulanan*: RM {total_kutipan:.2f} (Total Anak: {len(db_yuran)})", parse_mode="Markdown")
+        return
+
+    elif "Keluarkan Dari Senarai" in input_text:
+        keyboard = []
+        for branch in BRANCHES:
+            kids = get_kids_for_branch(branch)
+            for k in kids:
+                keyboard.append([InlineKeyboardButton(f"❌ {k} ({branch})", callback_data=f"del_kid_{branch}_{k}")])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text("❌ *Keluarkan Anak Dari Senarai*:", reply_markup=reply_markup, parse_mode="Markdown")
+        return
+
+    # SEKSYEN SESSION
     if user_id in user_sessions:
         session = user_sessions[user_id]
         mode = session.get("mode")
-        now = datetime.now(MY_TZ)
 
-        # STEP A: TERIMA NAMA ANAK -> MINTA JUMLAH YURAN
-        if mode == "register_kid_name":
-            branch_name = session["branch"]
-            new_kid_name = input_text
+        if mode == "input_ot":
+            await update.message.reply_text(f"✅ *Rekod OT Disimpan*: {input_text}", parse_mode="Markdown")
+            del user_sessions[user_id]
 
-            # Simpan nama dan tukar mode ke register_kid_fee
-            user_sessions[user_id] = {
-                "mode": "register_kid_fee",
-                "branch": branch_name,
-                "kid_name": new_kid_name
-            }
+        elif mode == "register_kid_name":
+            user_sessions[user_id] = {"mode": "register_kid_fee", "branch": session["branch"], "kid_name": input_text}
+            await update.message.reply_text(f"💰 Taip jumlah yuran bulanan rasmi untuk *{input_text}*:", parse_mode="Markdown")
 
-            await update.message.reply_text(
-                text=f"💰 *Masukkan Jumlah Yuran Bulanan*\n\nSila taip **jumlah yuran rasmi (RM)** untuk *{new_kid_name}*:\n*(Contoh: 350 atau 400)*",
-                parse_mode="Markdown"
-            )
-            return
-
-        # STEP B: TERIMA JUMLAH YURAN -> SIMPAN & PAPARAN RESIT
         elif mode == "register_kid_fee":
             try:
                 fee_val = float(input_text.replace("RM", "").strip())
-                branch_name = session["branch"]
-                new_kid_name = session["kid_name"]
-
-                if branch_name not in dynamic_kids:
-                    dynamic_kids[branch_name] = []
-
-                dynamic_kids[branch_name].append(new_kid_name)
-                db_yuran[new_kid_name] = {"yuran": fee_val, "bayar": 0.0}
-
-                keyboard = [[InlineKeyboardButton("👑 Dashboard Owner", callback_data="owner_main_menu")]]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-
-                await update.message.reply_text(
-                    text=f"✅ *Pendaftaran Anak Baharu Berjaya!*\n\n"
-                         f"👶 Nama: *{new_kid_name}*\n"
-                         f"📍 Cawangan: *{branch_name}*\n"
-                         f"💰 Yuran Bulanan: *RM {fee_val:.2f}*\n\n"
-                         f"Maklumat ini telah dimasukkan ke dalam senarai cawangan secara automatik!",
-                    reply_markup=reply_markup,
-                    parse_mode="Markdown"
-                )
+                b_name, k_name = session["branch"], session["kid_name"]
+                if b_name not in dynamic_kids:
+                    dynamic_kids[b_name] = []
+                dynamic_kids[b_name].append(k_name)
+                db_yuran[k_name] = {"yuran": fee_val, "bayar": 0.0}
+                await update.message.reply_text(f"✅ *{k_name}* berjaya didaftarkan dengan Yuran RM {fee_val:.2f}!", parse_mode="Markdown")
                 del user_sessions[user_id]
             except ValueError:
-                await update.message.reply_text("⚠️ Sila taip nombor yuran sahaja (contoh: `350` atau `400`).")
-                return
+                await update.message.reply_text("⚠️ Sila taip nombor sahaja.")
 
-        # TAIPAN MASA MANUAL
         elif mode == "manual_time":
-            action_text = "Check-In Anak" if session["action"] == "in" else "Check-Out Anak"
-            keyboard = [[InlineKeyboardButton("🔙 Menu Anak", callback_data=f"menu_kids_{session['branch']}")]]
+            k_name, act, b_name = session["kid"], session["action"], session["branch"]
+            attendance_status[k_name] = {"status": act, "time": input_text}
+            keyboard = [[InlineKeyboardButton("🔙 Menu Anak", callback_data=f"menu_kids_{b_name}")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
-
-            await update.message.reply_text(
-                text=f"✅ *Rekod Berjaya Disimpan (Manual)!*\n\n"
-                     f"👶 Nama: *{session['kid']}*\n"
-                     f"📍 Cawangan: *{session['branch']}*\n"
-                     f"📝 Jenis: *{action_text}*\n"
-                     f"⏰ Masa Manual: *{input_text}*\n"
-                     f"📅 Tarikh: *{now.strftime('%d/%m/%Y')}*",
-                reply_markup=reply_markup,
-                parse_mode="Markdown",
-            )
+            await update.message.reply_text(f"✅ *Rekod Manual Disimpan!*\n\n👶 Nama: *{k_name}*\n⏰ Masa: *{input_text}*", reply_markup=reply_markup, parse_mode="Markdown")
             del user_sessions[user_id]
 
-        # KEMASKINI BAYARAN
         elif mode == "update_pay":
             try:
                 pay_val = float(input_text.replace("RM", "").strip())
-                kid_name = session["kid"]
-                branch_name = session["branch"]
-
-                if kid_name not in db_yuran:
-                    db_yuran[kid_name] = {"yuran": 0.0, "bayar": 0.0}
-
-                db_yuran[kid_name]["bayar"] = pay_val
-                info = db_yuran[kid_name]
-                baki = info["yuran"] - info["bayar"]
-                status = "Lunas ✅" if baki <= 0 and info["yuran"] > 0 else "Belum Lunas ❌"
-
-                keyboard = [[InlineKeyboardButton("💳 Kembali ke Rekod Yuran", callback_data=f"yuran_kid_{branch_name}_{kid_name}")]]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-
-                await update.message.reply_text(
-                    text=f"✅ *Bayaran Yuran Berjaya Dikemaskini!*\n\n"
-                         f"👤 Nama Anak: *{kid_name}*\n"
-                         f"💵 Bayaran Terkini: *RM {pay_val:.2f}*\n"
-                         f"📊 Baki Yuran: *RM {max(0, baki):.2f}*\n"
-                         f"📌 Status: *{status}*",
-                    reply_markup=reply_markup,
-                    parse_mode="Markdown"
-                )
+                k_name, b_name = session["kid"], session["branch"]
+                if k_name not in db_yuran:
+                    db_yuran[k_name] = {"yuran": 0.0, "bayar": 0.0}
+                db_yuran[k_name]["bayar"] = pay_val
+                await update.message.reply_text(f"✅ Bayaran *{k_name}* dikemaskini: RM {pay_val:.2f}", parse_mode="Markdown")
                 del user_sessions[user_id]
             except ValueError:
-                await update.message.reply_text("⚠️ Sila taip nombor sahaja (contoh: `100` atau `350`).")
-                return
+                await update.message.reply_text("⚠️ Sila taip nombor sahaja.")
 
-        # KEMASKINI SET TOTAL YURAN
         elif mode == "update_fee":
             try:
                 fee_val = float(input_text.replace("RM", "").strip())
-                kid_name = session["kid"]
-                branch_name = session["branch"]
-
-                if kid_name not in db_yuran:
-                    db_yuran[kid_name] = {"yuran": fee_val, "bayar": 0.0}
+                k_name = session["kid"]
+                if k_name not in db_yuran:
+                    db_yuran[k_name] = {"yuran": fee_val, "bayar": 0.0}
                 else:
-                    db_yuran[kid_name]["yuran"] = fee_val
-
-                keyboard = [[InlineKeyboardButton("💳 Kembali ke Rekod Yuran", callback_data=f"yuran_kid_{branch_name}_{kid_name}")]]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-
-                await update.message.reply_text(
-                    text=f"✅ *Jumlah Yuran Bulanan Berjaya Ditetapkan!*\n\n"
-                         f"👤 Nama Anak: *{kid_name}*\n"
-                         f"💰 Yuran Rasmi: *RM {fee_val:.2f}*",
-                    reply_markup=reply_markup,
-                    parse_mode="Markdown"
-                )
+                    db_yuran[k_name]["yuran"] = fee_val
+                await update.message.reply_text(f"✅ Yuran *{k_name}* ditetapkan: RM {fee_val:.2f}", parse_mode="Markdown")
                 del user_sessions[user_id]
             except ValueError:
-                await update.message.reply_text("⚠️ Sila taip nombor sahaja (contoh: `350` atau `400`).")
-                return
+                await update.message.reply_text("⚠️ Sila taip nombor sahaja.")
 
 # ---------------------------------------------------------
 # 4. MAIN PROGRAM
@@ -585,12 +478,9 @@ if __name__ == "__main__":
         exit(1)
 
     application = ApplicationBuilder().token(TOKEN).build()
-
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(button_handler))
-    application.add_handler(
-        MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text_inputs)
-    )
+    application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text_inputs))
 
     print("Bot Taska sedang aktif berjalan...")
     application.run_polling()
