@@ -616,12 +616,13 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         cur = conn.cursor()
         
-        # Ambil data yuran bersama maklumat cawangan anak
+        # Ambil data yuran + padankan cawangan (jika tiada cawangan, automatik ke 'Taska Utama')
         cur.execute("""
-            SELECT f.kid_name, f.total_yuran, f.bayar_hari_ini, f.total_paid, k.branch_name
+            SELECT f.kid_name, f.total_yuran, f.bayar_hari_ini, f.total_paid, 
+                   COALESCE(k.branch_name, 'Taska Utama') AS branch_name
             FROM fees f
-            LEFT JOIN kids k ON f.kid_name = k.kid_name
-            ORDER BY k.branch_name, f.kid_name;
+            LEFT JOIN kids k ON LOWER(f.kid_name) = LOWER(k.kid_name)
+            ORDER BY branch_name, f.kid_name;
         """)
         records = cur.fetchall()
         cur.close()
@@ -631,12 +632,8 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await update.message.reply_text("📊 *Laporan Bulanan*\n\nTiada rekod pendaftaran atau yuran lagi.", parse_mode="Markdown")
             return
 
-        # Susun mengikut cawangan taska
+        # Susun data mengikut cawangan
         branch_data = {}
-        grand_total_yuran = 0.0
-        grand_total_paid = 0.0
-        grand_total_baki = 0.0
-        total_lunas_count = 0
 
         for r in records:
             kid = r['kid_name']
@@ -644,48 +641,53 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
             paid = float(r['total_paid'])
             baki = max(0.0, yuran - paid)
             status = "✅ Lunas" if baki <= 0 and yuran > 0 else "❌ Belum Lunas"
-            branch = r['branch_name'] if r['branch_name'] else "Tanpa Cawangan"
-
-            if status == "✅ Lunas":
-                total_lunas_count += 1
-
-            grand_total_yuran += yuran
-            grand_total_paid += paid
-            grand_total_baki += baki
+            branch = r['branch_name']
 
             if branch not in branch_data:
-                branch_data[branch] = []
+                branch_data[branch] = {
+                    "kids": [],
+                    "sub_yuran": 0.0,
+                    "sub_paid": 0.0,
+                    "sub_baki": 0.0,
+                    "sub_lunas": 0
+                }
             
-            branch_data[branch].append({
+            branch_data[branch]["kids"].append({
                 "kid": kid,
                 "yuran": yuran,
                 "paid": paid,
                 "baki": baki,
                 "status": status
             })
+            branch_data[branch]["sub_yuran"] += yuran
+            branch_data[branch]["sub_paid"] += paid
+            branch_data[branch]["sub_baki"] += baki
+            if status == "✅ Lunas":
+                branch_data[branch]["sub_lunas"] += 1
 
-        # Bina Mesej Laporan Terperinci
+        # Bina Mesej Laporan Mengikut Cawangan Taska Sahaja
         now = datetime.now(MY_TZ)
         report_msg = f"📊 *LAPORAN YURAN BULANAN ({now.strftime('%m/%Y')})*\n"
         report_msg += f"───────────────────────\n\n"
 
-        for b_name, kids in branch_data.items():
-            report_msg += f"🏢 *{b_name}*\n"
-            for k in kids:
+        for b_name, b_info in branch_data.items():
+            report_msg += f"🏢 *{b_name.upper()}*\n"
+            for k in b_info["kids"]:
                 report_msg += (
                     f" • *{k['kid']}*\n"
                     f"    - Dibayar: RM {k['paid']:.2f} / RM {k['yuran']:.2f}\n"
                     f"    - Baki: RM {k['baki']:.2f} ({k['status']})\n"
                 )
-            report_msg += "\n"
-
-        report_msg += f"───────────────────────\n"
-        report_msg += f"📈 *RINGKASAN KESELURUHAN (SEMUA TASKA)*\n"
-        report_msg += f"👥 *Jumlah Anak:* {len(records)} Orang\n"
-        report_msg += f"✅ *Anak Lunas:* {total_lunas_count} / {len(records)}\n"
-        report_msg += f"💵 *Total Sasaran Yuran:* RM {grand_total_yuran:.2f}\n"
-        report_msg += f"💰 *Total Kutipan Termasuk:* RM {grand_total_paid:.2f}\n"
-        report_msg += f"⚠️ *Total Baki Belum Bayar:* RM {grand_total_baki:.2f}\n"
+            
+            # Ringkasan/Collection Khusus Cawangan Ini
+            report_msg += (
+                f"\n📌 *Collection ({b_name}):*\n"
+                f"   👥 Jumlah Anak: {len(b_info['kids'])} Orang ({b_info['sub_lunas']} Lunas)\n"
+                f"   💵 Sasaran Yuran: RM {b_info['sub_yuran']:.2f}\n"
+                f"   💰 Total Kutipan: RM {b_info['sub_paid']:.2f}\n"
+                f"   ⚠️ Baki Belum Bayar: RM {b_info['sub_baki']:.2f}\n"
+                f"───────────────────────\n\n"
+            )
 
         keyboard = [[InlineKeyboardButton("🔙 Kembali ke Dashboard", callback_data="owner_main_menu")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -719,109 +721,4 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     # Kemaskini cawangan jika nama sudah wujud, atau masukkan baru jika belum ada
                     cur.execute("""
                         INSERT INTO kids (branch_name, kid_name) VALUES (%s, %s)
-                        ON CONFLICT (kid_name) 
-                        DO UPDATE SET branch_name = EXCLUDED.branch_name;
-                    """, (b_name, k_name))
-                    conn.commit()
-                    cur.close()
-                    conn.close()
-
-                update_fee_record(k_name, yuran=fee_val)
-
-                keyboard = [[InlineKeyboardButton("🔙 Kembali ke Dashboard", callback_data="owner_main_menu")]]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-
-                await update.message.reply_text(
-                    text=f"✅ *Pendaftaran Berjaya & Dikemaskini ke Database!*\n\n"
-                         f"👶 Nama: *{k_name}*\n"
-                         f"📍 Cawangan: *{b_name}*\n"
-                         f"💰 Jumlah Yuran Rasmi: *RM {fee_val:.2f}*",
-                    reply_markup=reply_markup,
-                    parse_mode="Markdown"
-                )
-                del user_sessions[user_id]
-            except ValueError:
-                await update.message.reply_text("⚠️ Sila taip nombor sahaja.")
-
-        elif mode == "manual_time":
-            k_name, act, b_name = session["kid"], session["action"], session["branch"]
-            set_attendance_record(k_name, b_name, "kid", act, input_text)
-            keyboard = [[InlineKeyboardButton("🔙 Menu Anak", callback_data=f"menu_kids_{b_name}")]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await update.message.reply_text(f"✅ *Rekod Manual Disimpan ke Database!*\n\n👶 Nama: *{k_name}*\n⏰ Masa: *{input_text}*", reply_markup=reply_markup, parse_mode="Markdown")
-            del user_sessions[user_id]
-
-        elif mode == "update_pay":
-            try:
-                pay_val = float(input_text.replace("RM", "").strip())
-                k_name, b_name = session["kid"], session["branch"]
-                
-                update_fee_record(k_name, add_pay=pay_val)
-                info = get_fee_record(k_name)
-                total_yuran = info["yuran"]
-                total_paid = info["total_paid"]
-                baki = total_yuran - total_paid
-                status = "Lunas ✅" if baki <= 0 and total_yuran > 0 else "Belum Lunas ❌"
-
-                keyboard = [
-                    [InlineKeyboardButton("💳 Rekod Yuran Anak", callback_data=f"yuran_kid_{b_name}_{k_name}")],
-                    [InlineKeyboardButton("🔙 Kembali ke Dashboard", callback_data="owner_main_menu")]
-                ]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-
-                text_response = (
-                    f"✅ *Bayaran Yuran Berjaya Disimpan ke Database!*\n\n"
-                    f"👤 Nama Anak: *{k_name}*\n"
-                    f"───────────────────────\n"
-                    f"1. *Jumlah Yuran:* RM {total_yuran:.2f}\n"
-                    f"2. *Bayaran (Hari Ini):* RM {pay_val:.2f}\n"
-                    f"3. *Jumlah Terkini (Sudah Dibayar):* RM {total_paid:.2f}\n"
-                    f"4. *Baki:* RM {max(0, baki):.2f}\n"
-                    f"5. *Status:* {status}\n"
-                    f"───────────────────────"
-                )
-
-                await update.message.reply_text(text=text_response, reply_markup=reply_markup, parse_mode="Markdown")
-                del user_sessions[user_id]
-            except ValueError:
-                await update.message.reply_text("⚠️ Sila taip nombor sahaja.")
-
-        elif mode == "update_fee":
-            try:
-                fee_val = float(input_text.replace("RM", "").strip())
-                k_name, b_name = session["kid"], session["branch"]
-                
-                update_fee_record(k_name, yuran=fee_val)
-
-                keyboard = [
-                    [InlineKeyboardButton("💳 Rekod Yuran Anak", callback_data=f"yuran_kid_{b_name}_{k_name}")],
-                    [InlineKeyboardButton("🔙 Kembali ke Dashboard", callback_data="owner_main_menu")]
-                ]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-
-                await update.message.reply_text(
-                    text=f"✅ *Jumlah Yuran Bulanan Ditetapkan di Database!*\n\n"
-                         f"👤 Nama Anak: *{k_name}*\n"
-                         f"💰 Jumlah Yuran Rasmi: *RM {fee_val:.2f}*",
-                    reply_markup=reply_markup,
-                    parse_mode="Markdown"
-                )
-                del user_sessions[user_id]
-            except ValueError:
-                await update.message.reply_text("⚠️ Sila taip nombor sahaja.")
-
-# ---------------------------------------------------------
-# 5. MAIN PROGRAM
-# ---------------------------------------------------------
-if __name__ == "__main__":
-    if not TOKEN:
-        print("ERROR: TELEGRAM_TOKEN tidak dijumpai!")
-        exit(1)
-
-    application = ApplicationBuilder().token(TOKEN).build()
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CallbackQueryHandler(button_handler))
-    application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text_inputs))
-
-    print("Bot Taska sedang aktif berjalan...")
-    application.run_polling()
+                        ON CONFLICT (kid_
