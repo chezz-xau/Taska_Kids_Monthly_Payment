@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 MY_TZ = pytz.timezone("Asia/Kuala_Lumpur")
 
 # ---------------------------------------------------------
-# 1. FLASK HEARTBEAT (SUPAYA RENDER FREE TIER TIDAK SLEEP)
+# 1. FLASK HEARTBEAT
 # ---------------------------------------------------------
 app_web = Flask("")
 
@@ -60,8 +60,7 @@ ot_staff_db = {}
 db_yuran = {}
 user_sessions = {}
 
-# Rekod Status Kehadiran Harian (Anak & Staff) dengan Cawangan
-# Format: {"Ahmad": {"branch": "Taska Corner", "status": "in", "time": "08:15 AM"}}
+# Rekod Status Kehadiran Harian (Anak & Staff)
 attendance_status = {}
 staff_attendance_status = {}
 
@@ -135,13 +134,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown",
         )
 
-    # 1. LAPORAN KEHADIRAN ANAK DENGAN LABEL SEMUA CAWANGAN
+    # 1. LAPORAN KEHADIRAN ANAK
     elif data == "owner_attendance_kids":
         keyboard = [[InlineKeyboardButton("🔙 Kembali", callback_data="owner_menu_kehadiran")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        report_text = "👶 *Laporan Kehadiran Anak (Semua Taska)*\n"
-        report_text += "───────────────────────\n"
+        report_text = "👶 *Laporan Kehadiran Anak (Semua Taska)*\n───────────────────────\n"
 
         has_data = False
         for branch in BRANCHES:
@@ -168,13 +166,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await query.edit_message_text(text=report_text, reply_markup=reply_markup, parse_mode="Markdown")
 
-    # 2. LAPORAN KEHADIRAN STAFF DENGAN LABEL SEMUA CAWANGAN
+    # 2. LAPORAN KEHADIRAN STAFF
     elif data == "owner_attendance_staff":
         keyboard = [[InlineKeyboardButton("🔙 Kembali", callback_data="owner_menu_kehadiran")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        staff_text = "👩‍🏫 *Rekod Kehadiran Staff (Semua Taska)*\n"
-        staff_text += "───────────────────────\n"
+        staff_text = "👩‍🏫 *Rekod Kehadiran Staff (Semua Taska)*\n───────────────────────\n"
 
         for branch in BRANCHES:
             staff_list = get_staff_for_branch(branch)
@@ -265,7 +262,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if key_rem not in dynamic_kids:
             dynamic_kids[key_rem] = []
         dynamic_kids[key_rem].append(kid_name)
-        keyboard = [[InlineKeyboardButton("🔙 Senarai Cawangan", callback_data="owner_main_menu")]]
+        keyboard = [[InlineKeyboardButton("🔙 Kembali ke Dashboard", callback_data="owner_main_menu")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(text=f"❌ *{kid_name}* dikeluarkan dari senarai.", reply_markup=reply_markup, parse_mode="Markdown")
 
@@ -276,7 +273,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("📝 Pendaftaran Baru Anak-Anak", callback_data="owner_select_branch_register")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(text="👑 *Dashboard Owner*", reply_markup=reply_markup, parse_mode="Markdown")
+        
+        # Sekiranya dipanggil dari callback button
+        if query:
+            await query.edit_message_text(text="👑 *Dashboard Pengurusan (Owner/Admin)*\n\nSila pilih kategori pengurusan:", reply_markup=reply_markup, parse_mode="Markdown")
 
     # ==========================================
     # 👩‍🏫 SUB-MENU STAFF & ANAK
@@ -361,9 +361,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         action, branch_name, kid_name = parts[2], parts[3], parts[4]
         now = datetime.now(MY_TZ)
         time_str = now.strftime('%I:%M %p')
-        action_text = "Check-In Anak" if action == "in" else "Check-Out Anak"
 
-        # Simpan status berserta maklumat cawangan
         attendance_status[kid_name] = {"branch": branch_name, "status": action, "time": time_str}
 
         keyboard = [[InlineKeyboardButton("🔙 Menu Anak", callback_data=f"menu_kids_{branch_name}")]]
@@ -448,7 +446,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         now = datetime.now(MY_TZ)
         time_str = now.strftime('%I:%M %p')
 
-        # Simpan status staff berserta cawangan
         staff_attendance_status[staff_name] = {"branch": branch_name, "status": action, "time": time_str}
 
         keyboard = [[InlineKeyboardButton("🔙 Menu Staff", callback_data=f"menu_staff_{branch_name}")]]
@@ -470,13 +467,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text="👋 *Sistem Pengurusan Taska*", reply_markup=reply_markup, parse_mode="Markdown")
 
 # ---------------------------------------------------------
-# FUNGSI MENERIMA MESEJ TAIPAN
+# 4. FUNGSI MENERIMA MESEJ TAIPAN (TEXT INPUTS)
 # ---------------------------------------------------------
 async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     input_text = update.message.text.strip()
     now = datetime.now(MY_TZ)
+    is_owner = user_id in OWNER_IDS
 
+    # ---------------------------------------------------------
+    # BUTANG MENU BAWAH (REPLY KEYBOARD)
+    # ---------------------------------------------------------
     if "Late Pick Up" in input_text:
         await update.message.reply_text("⏱️ *Kiraan Denda Lewat Pick-Up*: RM 10.00 / 30 Minit selepas 06:00 PM.", parse_mode="Markdown")
         return
@@ -528,13 +529,17 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("❌ *Keluarkan Anak Dari Senarai*:", reply_markup=reply_markup, parse_mode="Markdown")
         return
 
-    # SEKSYEN SESSION
+    # ---------------------------------------------------------
+    # SEKSYEN PENANGAN SESI TAIPAN (DENGAN BUTANG KEMBALI OWNER)
+    # ---------------------------------------------------------
     if user_id in user_sessions:
         session = user_sessions[user_id]
         mode = session.get("mode")
 
         if mode == "input_ot":
-            await update.message.reply_text(f"✅ *Rekod OT Disimpan*: {input_text}", parse_mode="Markdown")
+            keyboard = [[InlineKeyboardButton("🔙 Kembali ke Dashboard", callback_data="owner_main_menu")]] if is_owner else []
+            reply_markup = InlineKeyboardMarkup(keyboard) if is_owner else None
+            await update.message.reply_text(f"✅ *Rekod OT Disimpan*: {input_text}", reply_markup=reply_markup, parse_mode="Markdown")
             del user_sessions[user_id]
 
         elif mode == "register_kid_name":
@@ -549,7 +554,16 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     dynamic_kids[b_name] = []
                 dynamic_kids[b_name].append(k_name)
                 db_yuran[k_name] = {"yuran": fee_val, "bayar": 0.0}
-                await update.message.reply_text(f"✅ *{k_name}* berjaya didaftarkan dengan Yuran RM {fee_val:.2f}!", parse_mode="Markdown")
+
+                # TAMPILKAN BUTANG KEMBALI UNTUK OWNER
+                keyboard = [[InlineKeyboardButton("🔙 Kembali ke Dashboard", callback_data="owner_main_menu")]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+
+                await update.message.reply_text(
+                    text=f"✅ *{k_name}* berjaya didaftarkan dengan Yuran RM {fee_val:.2f}!",
+                    reply_markup=reply_markup,
+                    parse_mode="Markdown"
+                )
                 del user_sessions[user_id]
             except ValueError:
                 await update.message.reply_text("⚠️ Sila taip nombor sahaja.")
@@ -569,7 +583,19 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 if k_name not in db_yuran:
                     db_yuran[k_name] = {"yuran": 0.0, "bayar": 0.0}
                 db_yuran[k_name]["bayar"] = pay_val
-                await update.message.reply_text(f"✅ Bayaran *{k_name}* dikemaskini: RM {pay_val:.2f}", parse_mode="Markdown")
+
+                # TAMPILKAN BUTANG KEMBALI UNTUK OWNER
+                keyboard = [
+                    [InlineKeyboardButton("💳 Rekod Yuran Anak", callback_data=f"yuran_kid_{b_name}_{k_name}")],
+                    [InlineKeyboardButton("🔙 Kembali ke Dashboard", callback_data="owner_main_menu")]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+
+                await update.message.reply_text(
+                    text=f"✅ Bayaran *{k_name}* dikemaskini: RM {pay_val:.2f}",
+                    reply_markup=reply_markup,
+                    parse_mode="Markdown"
+                )
                 del user_sessions[user_id]
             except ValueError:
                 await update.message.reply_text("⚠️ Sila taip nombor sahaja.")
@@ -577,18 +603,30 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
         elif mode == "update_fee":
             try:
                 fee_val = float(input_text.replace("RM", "").strip())
-                k_name = session["kid"]
+                k_name, b_name = session["kid"], session["branch"]
                 if k_name not in db_yuran:
                     db_yuran[k_name] = {"yuran": fee_val, "bayar": 0.0}
                 else:
                     db_yuran[k_name]["yuran"] = fee_val
-                await update.message.reply_text(f"✅ Yuran *{k_name}* ditetapkan: RM {fee_val:.2f}", parse_mode="Markdown")
+
+                # TAMPILKAN BUTANG KEMBALI UNTUK OWNER
+                keyboard = [
+                    [InlineKeyboardButton("💳 Rekod Yuran Anak", callback_data=f"yuran_kid_{b_name}_{k_name}")],
+                    [InlineKeyboardButton("🔙 Kembali ke Dashboard", callback_data="owner_main_menu")]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+
+                await update.message.reply_text(
+                    text=f"✅ Yuran bulanan *{k_name}* ditetapkan: RM {fee_val:.2f}",
+                    reply_markup=reply_markup,
+                    parse_mode="Markdown"
+                )
                 del user_sessions[user_id]
             except ValueError:
                 await update.message.reply_text("⚠️ Sila taip nombor sahaja.")
 
 # ---------------------------------------------------------
-# 4. MAIN PROGRAM
+# 5. MAIN PROGRAM
 # ---------------------------------------------------------
 if __name__ == "__main__":
     if not TOKEN:
