@@ -4,6 +4,8 @@ import pytz
 from datetime import datetime
 from threading import Thread
 from flask import Flask
+import psycopg2
+from psycopg2.extras import RealDictCursor
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     ApplicationBuilder,
@@ -24,13 +26,13 @@ logger = logging.getLogger(__name__)
 MY_TZ = pytz.timezone("Asia/Kuala_Lumpur")
 
 # ---------------------------------------------------------
-# 1. FLASK HEARTBEAT (SUPAYA RENDER FREE TIER TIDAK SLEEP)
+# 1. FLASK HEARTBEAT
 # ---------------------------------------------------------
 app_web = Flask("")
 
 @app_web.route("/")
 def home():
-    return "Bot Taska sedang berjalan 24/7!"
+    return "Bot Taska sedang berjalan 24/7 dengan PostgreSQL!"
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
@@ -39,9 +41,10 @@ def run_web():
 Thread(target=run_web, daemon=True).start()
 
 # ---------------------------------------------------------
-# 2. ENVIRONMENT VARIABLES & SIMPANAN STATUS
+# 2. ENVIRONMENT VARIABLES & POSTGRESQL DATABASE SETUP
 # ---------------------------------------------------------
 TOKEN = os.environ.get("TELEGRAM_TOKEN", "").strip()
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 
 owner_ids_raw = os.environ.get("OWNER_IDS", "")
 OWNER_IDS = [
@@ -54,28 +57,83 @@ BRANCHES = [
     if b.strip()
 ]
 
-# Database Sementara
-dynamic_kids = {}
-ot_staff_db = {}
 user_sessions = {}
 
-# DB YURAN DENGAN PERINCIAN LENGKAP
-# Format: {"AHMAD": {"yuran": 350.0, "bayar_hari_ini": 50.0, "total_paid": 250.0}}
-db_yuran = {}
+# Fungsi Akses Database PostgreSQL
+def get_db_connection():
+    if not DATABASE_URL:
+        logger.error("DATABASE_URL tidak dijumpai dalam Environment Variables!")
+        return None
+    try:
+        # Mengendalikan prefix postgres:// -> postgresql:// jika perlu
+        db_url = DATABASE_URL
+        if db_url.startswith("postgres://"):
+            db_url = db_url.replace("postgres://", "postgresql://", 1)
+        conn = psycopg2.connect(db_url, cursor_factory=RealDictCursor)
+        return conn
+    except Exception as e:
+        logger.error(f"Ralat Sambungan Database: {e}")
+        return None
 
-# Rekod Status Kehadiran Harian (Anak & Staff)
-attendance_status = {}
-staff_attendance_status = {}
+def init_db():
+    conn = get_db_connection()
+    if not conn:
+        return
+    cur = conn.cursor()
+    # Jadual Anak Dinamik
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS kids (
+            id SERIAL PRIMARY KEY,
+            branch_name VARCHAR(100),
+            kid_name VARCHAR(100) UNIQUE,
+            status VARCHAR(20) DEFAULT 'active'
+        );
+    """)
+    # Jadual Yuran
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS fees (
+            kid_name VARCHAR(100) PRIMARY KEY,
+            total_yuran NUMERIC(10, 2) DEFAULT 0.00,
+            bayar_hari_ini NUMERIC(10, 2) DEFAULT 0.00,
+            total_paid NUMERIC(10, 2) DEFAULT 0.00
+        );
+    """)
+    # Jadual Kehadiran Harian
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS attendance (
+            person_name VARCHAR(100) PRIMARY KEY,
+            branch_name VARCHAR(100),
+            person_type VARCHAR(20), -- 'kid' atau 'staff'
+            status VARCHAR(20),       -- 'in' atau 'out'
+            check_time VARCHAR(20),
+            date_str VARCHAR(20)
+        );
+    """)
+    conn.commit()
+    cur.close()
+    conn.close()
 
+# Cipta jadual semasa startup
+init_db()
+
+# ---------------------------------------------------------
+# FUNGSI HELPER DATABASE
+# ---------------------------------------------------------
 def get_kids_for_branch(branch_name: str):
     clean_name = branch_name.upper().replace(" ", "_")
     kids_raw = os.environ.get(f"KIDS_{clean_name}", "")
     base_list = [k.strip() for k in kids_raw.split(",") if k.strip()] if kids_raw else []
-    
-    extra_kids = dynamic_kids.get(branch_name, [])
-    all_kids = list(set(base_list + extra_kids))
-    removed = dynamic_kids.get(f"removed_{branch_name}", [])
-    return [k for k in all_kids if k not in removed]
+
+    conn = get_db_connection()
+    db_kids = []
+    if conn:
+        cur = conn.cursor()
+        cur.execute("SELECT kid_name FROM kids WHERE branch_name = %s AND status = 'active';", (branch_name,))
+        db_kids = [row['kid_name'] for row in cur.fetchall()]
+        cur.close()
+        conn.close()
+
+    return list(set(base_list + db_kids))
 
 def get_staff_for_branch(branch_name: str):
     clean_name = branch_name.upper().replace(" ", "_")
@@ -83,6 +141,64 @@ def get_staff_for_branch(branch_name: str):
     if not staff_raw:
         return []
     return [s.strip() for s in staff_raw.split(",") if s.strip()]
+
+def get_attendance_record(person_name: str):
+    conn = get_db_connection()
+    rec = None
+    if conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM attendance WHERE person_name = %s;", (person_name,))
+        rec = cur.fetchone()
+        cur.close()
+        conn.close()
+    return rec
+
+def set_attendance_record(person_name: str, branch_name: str, person_type: str, status: str, time_str: str):
+    conn = get_db_connection()
+    if conn:
+        cur = conn.cursor()
+        today = datetime.now(MY_TZ).strftime('%d/%m/%Y')
+        cur.execute("""
+            INSERT INTO attendance (person_name, branch_name, person_type, status, check_time, date_str)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (person_name) 
+            DO UPDATE SET status = EXCLUDED.status, check_time = EXCLUDED.check_time, date_str = EXCLUDED.date_str;
+        """, (person_name, branch_name, person_type, status, time_str, today))
+        conn.commit()
+        cur.close()
+        conn.close()
+
+def get_fee_record(kid_name: str):
+    conn = get_db_connection()
+    rec = None
+    if conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM fees WHERE kid_name = %s;", (kid_name,))
+        rec = cur.fetchone()
+        cur.close()
+        conn.close()
+    if not rec:
+        return {"yuran": 0.0, "bayar_hari_ini": 0.0, "total_paid": 0.0}
+    return {"yuran": float(rec['total_yuran']), "bayar_hari_ini": float(rec['bayar_hari_ini']), "total_paid": float(rec['total_paid'])}
+
+def update_fee_record(kid_name: str, yuran: float = None, add_pay: float = None):
+    conn = get_db_connection()
+    if conn:
+        cur = conn.cursor()
+        current = get_fee_record(kid_name)
+        new_yuran = yuran if yuran is not None else current["yuran"]
+        new_pay_today = add_pay if add_pay is not None else current["bayar_hari_ini"]
+        new_total_paid = current["total_paid"] + (add_pay if add_pay is not None else 0.0)
+
+        cur.execute("""
+            INSERT INTO fees (kid_name, total_yuran, bayar_hari_ini, total_paid)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (kid_name)
+            DO UPDATE SET total_yuran = %s, bayar_hari_ini = %s, total_paid = %s;
+        """, (kid_name, new_yuran, new_pay_today, new_total_paid, new_yuran, new_pay_today, new_total_paid))
+        conn.commit()
+        cur.close()
+        conn.close()
 
 # ---------------------------------------------------------
 # 3. HANDLERS / FUNGSI BOT
@@ -121,9 +237,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     user_id = update.effective_user.id
 
-    # ==========================================
-    # 👑 SUB-MENU OWNER / ADMIN
-    # ==========================================
     if data == "owner_menu_kehadiran":
         keyboard = [
             [InlineKeyboardButton("👶 1. Anak", callback_data="owner_attendance_kids")],
@@ -137,39 +250,29 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown",
         )
 
-    # 1. LAPORAN KEHADIRAN ANAK
     elif data == "owner_attendance_kids":
         keyboard = [[InlineKeyboardButton("🔙 Kembali", callback_data="owner_menu_kehadiran")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         report_text = "👶 *Laporan Kehadiran Anak (Semua Taska)*\n───────────────────────\n"
 
-        has_data = False
         for branch in BRANCHES:
             kids_list = get_kids_for_branch(branch)
             report_text += f"\n🏢 *{branch}*\n"
-            
             branch_has_kid = False
             for kid in kids_list:
-                rec = attendance_status.get(kid, {})
-                if rec:
+                rec = get_attendance_record(kid)
+                if rec and rec["person_type"] == "kid":
                     st_icon = "🔴 Checked-In" if rec["status"] == "in" else "⚪ Checked-Out"
-                    report_text += f" • {kid}: {st_icon} (`{rec['time']}`)\n"
-                    branch_has_kid = True
-                    has_data = True
+                    report_text += f" • {kid}: {st_icon} (`{rec['check_time']}`)\n"
                 else:
                     report_text += f" • {kid}: ⚪ Belum Check-In\n"
-                    branch_has_kid = True
-            
+                branch_has_kid = True
             if not branch_has_kid:
                 report_text += "  _(Tiada senarai anak)_\n"
 
-        if not has_data and all(len(get_kids_for_branch(b)) == 0 for b in BRANCHES):
-            report_text = "👶 *Laporan Kehadiran Anak*\n\n⚠️ Tiada senarai anak di mana-mana cawangan."
-
         await query.edit_message_text(text=report_text, reply_markup=reply_markup, parse_mode="Markdown")
 
-    # 2. LAPORAN KEHADIRAN STAFF
     elif data == "owner_attendance_staff":
         keyboard = [[InlineKeyboardButton("🔙 Kembali", callback_data="owner_menu_kehadiran")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -179,17 +282,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for branch in BRANCHES:
             staff_list = get_staff_for_branch(branch)
             staff_text += f"\n🏢 *{branch}*\n"
-            
             branch_has_staff = False
             for sname in staff_list:
-                srec = staff_attendance_status.get(sname, {})
-                if srec:
+                srec = get_attendance_record(sname)
+                if srec and srec["person_type"] == "staff":
                     st_icon = "🔴 Clocked-In" if srec["status"] == "in" else "⚪ Clocked-Out"
-                    staff_text += f" • {sname}: {st_icon} (`{srec['time']}`)\n"
+                    staff_text += f" • {sname}: {st_icon} (`{srec['check_time']}`)\n"
                 else:
                     staff_text += f" • {sname}: ⚪ Belum Clock-In\n"
                 branch_has_staff = True
-            
             if not branch_has_staff:
                 staff_text += "  _(Tiada senarai staff)_\n"
 
@@ -225,12 +326,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(text=f"💳 *Pilih Anak* ({branch_name}):", reply_markup=reply_markup, parse_mode="Markdown")
 
-    # PAPARAN PERINCIAN YURAN (DENGAN 5 BUTIRAN LENGKAP)
     elif data.startswith("yuran_kid_"):
         parts = data.split("_", 3)
         branch_name, kid_name = parts[2], parts[3]
         
-        info = db_yuran.get(kid_name, {"yuran": 0.0, "bayar_hari_ini": 0.0, "total_paid": 0.0})
+        info = get_fee_record(kid_name)
         total_yuran = info["yuran"]
         bayar_hari_ini = info["bayar_hari_ini"]
         total_paid = info["total_paid"]
@@ -265,17 +365,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parts = data.split("_", 3)
         user_sessions[user_id] = {"mode": "update_fee", "branch": parts[2], "kid": parts[3]}
         await query.edit_message_text(text=f"✏️ Taip jumlah **yuran bulanan rasmi** untuk *{parts[3]}* (RM):", parse_mode="Markdown")
-
-    elif data.startswith("del_kid_"):
-        parts = data.split("_", 3)
-        branch_name, kid_name = parts[2], parts[3]
-        key_rem = f"removed_{branch_name}"
-        if key_rem not in dynamic_kids:
-            dynamic_kids[key_rem] = []
-        dynamic_kids[key_rem].append(kid_name)
-        keyboard = [[InlineKeyboardButton("🔙 Kembali ke Dashboard", callback_data="owner_main_menu")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(text=f"❌ *{kid_name}* dikeluarkan dari senarai.", reply_markup=reply_markup, parse_mode="Markdown")
 
     elif data == "owner_main_menu":
         keyboard = [
@@ -321,8 +410,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = []
         if kids_list:
             for kid in kids_list:
-                status_rec = attendance_status.get(kid, {})
-                current_st = status_rec.get("status", "out")
+                rec = get_attendance_record(kid)
+                current_st = rec["status"] if rec else "out"
                 
                 if current_st == "in":
                     btn_label = f"🔴 {kid} (Sudah Check-In)"
@@ -342,15 +431,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         action, branch_name, kid_name = parts[1], parts[2], parts[3]
         action_text = "Check-In" if action == "in" else "Check-Out"
 
-        current_rec = attendance_status.get(kid_name, {})
-        current_st = current_rec.get("status", "out")
+        rec = get_attendance_record(kid_name)
+        current_st = rec["status"] if rec else "out"
 
         if action == "in" and current_st == "in":
             keyboard = [[InlineKeyboardButton("🔙 Kembali", callback_data=f"list_in_{branch_name}")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             await query.edit_message_text(
                 text=f"🛑 *AMARAN: CHECK-IN DIBLOK!*\n\n"
-                     f"🔴 *{kid_name}* sudah pun Check-In pada jam *{current_rec.get('time', '-') }*!\n\n"
+                     f"🔴 *{kid_name}* sudah pun Check-In pada jam *{rec['check_time'] if rec else '-'}*!\n\n"
                      f"Tidak boleh buat Check-In kali kedua.",
                 reply_markup=reply_markup,
                 parse_mode="Markdown"
@@ -371,12 +460,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         now = datetime.now(MY_TZ)
         time_str = now.strftime('%I:%M %p')
 
-        attendance_status[kid_name] = {"branch": branch_name, "status": action, "time": time_str}
+        set_attendance_record(kid_name, branch_name, "kid", action, time_str)
 
         keyboard = [[InlineKeyboardButton("🔙 Menu Anak", callback_data=f"menu_kids_{branch_name}")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(
-            text=f"✅ *Rekod Berjaya Disimpan (Auto)!*\n\n"
+            text=f"✅ *Rekod Berjaya Disimpan di Database!*\n\n"
                  f"👶 Nama: *{kid_name}*\n"
                  f"📍 Cawangan: *{branch_name}*\n"
                  f"📝 Status: *{'🔴 Check-In' if action=='in' else '⚪ Check-Out'}*\n"
@@ -417,8 +506,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = []
         if staff_list:
             for sname in staff_list:
-                s_rec = staff_attendance_status.get(sname, {})
-                c_st = s_rec.get("status", "out")
+                srec = get_attendance_record(sname)
+                c_st = srec["status"] if srec else "out"
 
                 if c_st == "in":
                     s_label = f"🔴 {sname} (Sudah Clock-In)"
@@ -437,15 +526,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parts = data.split("_", 3)
         action, branch_name, staff_name = parts[1], parts[2], parts[3]
         
-        s_rec = staff_attendance_status.get(staff_name, {})
-        c_st = s_rec.get("status", "out")
+        srec = get_attendance_record(staff_name)
+        c_st = srec["status"] if srec else "out"
 
         if action == "in" and c_st == "in":
             keyboard = [[InlineKeyboardButton("🔙 Kembali", callback_data=f"slist_in_{branch_name}")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             await query.edit_message_text(
                 text=f"🛑 *AMARAN: CLOCK-IN DIBLOK!*\n\n"
-                     f"🔴 *{staff_name}* sudah pun Clock-In pada jam *{s_rec.get('time', '-') }*!\n\n"
+                     f"🔴 *{staff_name}* sudah pun Clock-In pada jam *{srec['check_time'] if srec else '-'}*!\n\n"
                      f"Tidak boleh Clock-In kali kedua.",
                 reply_markup=reply_markup,
                 parse_mode="Markdown"
@@ -455,12 +544,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         now = datetime.now(MY_TZ)
         time_str = now.strftime('%I:%M %p')
 
-        staff_attendance_status[staff_name] = {"branch": branch_name, "status": action, "time": time_str}
+        set_attendance_record(staff_name, branch_name, "staff", action, time_str)
 
         keyboard = [[InlineKeyboardButton("🔙 Menu Staff", callback_data=f"menu_staff_{branch_name}")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(
-            text=f"✅ *Kehadiran Staff Direkodkan!*\n\n"
+            text=f"✅ *Kehadiran Staff Direkodkan di Database!*\n\n"
                  f"👩‍🏫 Staff: *{staff_name}*\n"
                  f"📍 Cawangan: *{branch_name}*\n"
                  f"📝 Status: *{'🟢 Clock-In' if action=='in' else '🔴 Clock-Out'}*\n"
@@ -484,7 +573,6 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
     now = datetime.now(MY_TZ)
     is_owner = user_id in OWNER_IDS
 
-    # MENU BAWAH (REPLY KEYBOARD)
     if "Late Pick Up" in input_text:
         await update.message.reply_text("⏱️ *Kiraan Denda Lewat Pick-Up*: RM 10.00 / 30 Minit selepas 06:00 PM.", parse_mode="Markdown")
         return
@@ -522,18 +610,20 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     elif "Laporan Bulanan" in input_text:
-        total_kutipan = sum([v.get("total_paid", 0.0) for v in db_yuran.values()])
-        await update.message.reply_text(f"📊 *Laporan Bulanan*: RM {total_kutipan:.2f} (Total Anak: {len(db_yuran)})", parse_mode="Markdown")
-        return
+        conn = get_db_connection()
+        total_kutipan = 0.0
+        total_anak = 0
+        if conn:
+            cur = conn.cursor()
+            cur.execute("SELECT SUM(total_paid) as sum_paid, COUNT(*) as cnt FROM fees;")
+            res = cur.fetchone()
+            if res and res['sum_paid']:
+                total_kutipan = float(res['sum_paid'])
+                total_anak = res['cnt']
+            cur.close()
+            conn.close()
 
-    elif "Keluarkan Dari Senarai" in input_text:
-        keyboard = []
-        for branch in BRANCHES:
-            kids = get_kids_for_branch(branch)
-            for k in kids:
-                keyboard.append([InlineKeyboardButton(f"❌ {k} ({branch})", callback_data=f"del_kid_{branch}_{k}")])
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text("❌ *Keluarkan Anak Dari Senarai*:", reply_markup=reply_markup, parse_mode="Markdown")
+        await update.message.reply_text(f"📊 *Laporan Bulanan*: Total Kutipan RM {total_kutipan:.2f} (Jumlah Anak Berdaftar: {total_anak})", parse_mode="Markdown")
         return
 
     # SEKSYEN PENANGAN SESI TAIPAN
@@ -555,18 +645,23 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
             try:
                 fee_val = float(input_text.replace("RM", "").strip())
                 b_name, k_name = session["branch"], session["kid_name"]
-                if b_name not in dynamic_kids:
-                    dynamic_kids[b_name] = []
-                dynamic_kids[b_name].append(k_name)
                 
-                # DAFTAR REKOD YURAN BAHARU
-                db_yuran[k_name] = {"yuran": fee_val, "bayar_hari_ini": 0.0, "total_paid": 0.0}
+                # SIMPAN KE DATABASE POSTGRESQL
+                conn = get_db_connection()
+                if conn:
+                    cur = conn.cursor()
+                    cur.execute("INSERT INTO kids (branch_name, kid_name) VALUES (%s, %s) ON CONFLICT DO NOTHING;", (b_name, k_name))
+                    conn.commit()
+                    cur.close()
+                    conn.close()
+
+                update_fee_record(k_name, yuran=fee_val)
 
                 keyboard = [[InlineKeyboardButton("🔙 Kembali ke Dashboard", callback_data="owner_main_menu")]]
                 reply_markup = InlineKeyboardMarkup(keyboard)
 
                 await update.message.reply_text(
-                    text=f"✅ *Pendaftaran Berjaya!*\n\n"
+                    text=f"✅ *Pendaftaran Berjaya & Disimpan Kekal ke Database!*\n\n"
                          f"👶 Nama: *{k_name}*\n"
                          f"📍 Cawangan: *{b_name}*\n"
                          f"💰 Jumlah Yuran Rasmi: *RM {fee_val:.2f}*",
@@ -579,26 +674,19 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         elif mode == "manual_time":
             k_name, act, b_name = session["kid"], session["action"], session["branch"]
-            attendance_status[k_name] = {"branch": b_name, "status": act, "time": input_text}
+            set_attendance_record(k_name, b_name, "kid", act, input_text)
             keyboard = [[InlineKeyboardButton("🔙 Menu Anak", callback_data=f"menu_kids_{b_name}")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
-            await update.message.reply_text(f"✅ *Rekod Manual Disimpan!*\n\n👶 Nama: *{k_name}*\n⏰ Masa: *{input_text}*", reply_markup=reply_markup, parse_mode="Markdown")
+            await update.message.reply_text(f"✅ *Rekod Manual Disimpan ke Database!*\n\n👶 Nama: *{k_name}*\n⏰ Masa: *{input_text}*", reply_markup=reply_markup, parse_mode="Markdown")
             del user_sessions[user_id]
 
-        # PROSES KEMASKINI BAYARAN (PENJUMLAHAN KUMULATIF)
         elif mode == "update_pay":
             try:
                 pay_val = float(input_text.replace("RM", "").strip())
                 k_name, b_name = session["kid"], session["branch"]
                 
-                if k_name not in db_yuran:
-                    db_yuran[k_name] = {"yuran": 0.0, "bayar_hari_ini": 0.0, "total_paid": 0.0}
-
-                # Kemaskini bayaran hari ini dan tambahkan ke total bayaran terkumpul
-                db_yuran[k_name]["bayar_hari_ini"] = pay_val
-                db_yuran[k_name]["total_paid"] += pay_val
-                
-                info = db_yuran[k_name]
+                update_fee_record(k_name, add_pay=pay_val)
+                info = get_fee_record(k_name)
                 total_yuran = info["yuran"]
                 total_paid = info["total_paid"]
                 baki = total_yuran - total_paid
@@ -611,7 +699,7 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 reply_markup = InlineKeyboardMarkup(keyboard)
 
                 text_response = (
-                    f"✅ *Bayaran Yuran Berjaya Dikemaskini!*\n\n"
+                    f"✅ *Bayaran Yuran Berjaya Disimpan ke Database!*\n\n"
                     f"👤 Nama Anak: *{k_name}*\n"
                     f"───────────────────────\n"
                     f"1. *Jumlah Yuran:* RM {total_yuran:.2f}\n"
@@ -627,16 +715,12 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
             except ValueError:
                 await update.message.reply_text("⚠️ Sila taip nombor sahaja.")
 
-        # PROSES SET YURAN BULANAN
         elif mode == "update_fee":
             try:
                 fee_val = float(input_text.replace("RM", "").strip())
                 k_name, b_name = session["kid"], session["branch"]
                 
-                if k_name not in db_yuran:
-                    db_yuran[k_name] = {"yuran": fee_val, "bayar_hari_ini": 0.0, "total_paid": 0.0}
-                else:
-                    db_yuran[k_name]["yuran"] = fee_val
+                update_fee_record(k_name, yuran=fee_val)
 
                 keyboard = [
                     [InlineKeyboardButton("💳 Rekod Yuran Anak", callback_data=f"yuran_kid_{b_name}_{k_name}")],
@@ -645,7 +729,7 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 reply_markup = InlineKeyboardMarkup(keyboard)
 
                 await update.message.reply_text(
-                    text=f"✅ *Jumlah Yuran Bulanan Ditetapkan!*\n\n"
+                    text=f"✅ *Jumlah Yuran Bulanan Ditetapkan di Database!*\n\n"
                          f"👤 Nama Anak: *{k_name}*\n"
                          f"💰 Jumlah Yuran Rasmi: *RM {fee_val:.2f}*",
                     reply_markup=reply_markup,
