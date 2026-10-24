@@ -60,8 +60,9 @@ ot_staff_db = {}
 db_yuran = {}
 user_sessions = {}
 
-# Rekod Status Kehadiran Harian: {"Ahmad": {"status": "in", "time": "08:15 AM"}}
-attendance_status = {}
+# Rekod Status Kehadiran Harian (Anak & Staff)
+attendance_status = {}  # Format: {"Ahmad": {"status": "in", "time": "08:15 AM"}}
+staff_attendance_status = {}  # Format: {"Cikgu Siti": {"status": "in", "time": "07:50 AM"}}
 
 def get_kids_for_branch(branch_name: str):
     clean_name = branch_name.upper().replace(" ", "_")
@@ -72,6 +73,13 @@ def get_kids_for_branch(branch_name: str):
     all_kids = list(set(base_list + extra_kids))
     removed = dynamic_kids.get(f"removed_{branch_name}", [])
     return [k for k in all_kids if k not in removed]
+
+def get_staff_for_branch(branch_name: str):
+    clean_name = branch_name.upper().replace(" ", "_")
+    staff_raw = os.environ.get(f"STAFF_{clean_name}", "")
+    if not staff_raw:
+        return []
+    return [s.strip() for s in staff_raw.split(",") if s.strip()]
 
 # ---------------------------------------------------------
 # 3. HANDLERS / FUNGSI BOT
@@ -132,7 +140,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         report_text = "👶 *Laporan Kehadiran Anak (Harian)*\n───────────────────────\n"
         if not attendance_status:
-            report_text += "⚠️ Belum ada rekod kehadiran hari ini."
+            report_text += "⚠️ Belum ada rekod kehadiran anak hari ini."
         else:
             for name, rec in attendance_status.items():
                 st_icon = "🔴 Checked-In" if rec["status"] == "in" else "⚪ Checked-Out"
@@ -143,7 +151,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "owner_attendance_staff":
         keyboard = [[InlineKeyboardButton("🔙 Kembali", callback_data="owner_menu_kehadiran")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(text="👩‍🏫 *Rekod Jam Kerja Staff (Harian)*", reply_markup=reply_markup, parse_mode="Markdown")
+        
+        staff_text = "👩‍🏫 *Rekod Kehadiran Staff (Harian)*\n───────────────────────\n"
+        if not staff_attendance_status:
+            staff_text += "⚠️ Belum ada rekod kehadiran staff hari ini."
+        else:
+            for sname, srec in staff_attendance_status.items():
+                st_icon = "🔴 Clocked-In" if srec["status"] == "in" else "⚪ Clocked-Out"
+                staff_text += f"👩‍🏫 *{sname}*: {st_icon} (`{srec['time']}`)\n"
+
+        await query.edit_message_text(text=staff_text, reply_markup=reply_markup, parse_mode="Markdown")
 
     elif data == "owner_select_branch_register":
         keyboard = [[InlineKeyboardButton(f"🏢 {branch}", callback_data=f"reg_br_{branch}")] for branch in BRANCHES]
@@ -228,7 +245,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text="👑 *Dashboard Owner*", reply_markup=reply_markup, parse_mode="Markdown")
 
     # ==========================================
-    # 👩‍🏫 SUB-MENU STAFF / CIKGU (DENGAN WARNA MERAH & KUNCI REKOD)
+    # 👩‍🏫 SUB-MENU STAFF & ANAK
     # ==========================================
     elif data.startswith("branch_"):
         branch_name = data.replace("branch_", "")
@@ -252,7 +269,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(text=f"👶 *Pengurusan Anak-Anak* ({branch_name}):", reply_markup=reply_markup, parse_mode="Markdown")
 
-    # PAPARAN SENARAI ANAK DENGAN WARNA MERAH JIKA SUDAH CHECK-IN[span_2](start_span)[span_2](end_span)
+    # PAPARAN SENARAI ANAK (DENGAN NAMA MERAH JIKA SUDAH CHECK-IN)
     elif data.startswith("list_in_") or data.startswith("list_out_"):
         action = "in" if "list_in_" in data else "out"
         branch_name = data.replace("list_in_", "").replace("list_out_", "")
@@ -265,7 +282,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 status_rec = attendance_status.get(kid, {})
                 current_st = status_rec.get("status", "out")
                 
-                # Tanda MERAH 🔴 jika sudah Check-In
                 if current_st == "in":
                     btn_label = f"🔴 {kid} (Sudah Check-In)"
                 else:
@@ -279,7 +295,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(text=f"👶 *Pilih Nama Anak untuk {action_label}* ({branch_name}):", reply_markup=reply_markup, parse_mode="Markdown")
 
-    # KAWALAN HALANGAN CHECK-IN 2 KALI
     elif data.startswith("kidselect_"):
         parts = data.split("_", 3)
         action, branch_name, kid_name = parts[1], parts[2], parts[3]
@@ -288,7 +303,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         current_rec = attendance_status.get(kid_name, {})
         current_st = current_rec.get("status", "out")
 
-        # SEKATAN CHECK-IN DUA KALI
         if action == "in" and current_st == "in":
             keyboard = [[InlineKeyboardButton("🔙 Kembali", callback_data=f"list_in_{branch_name}")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -307,11 +321,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🔙 Kembali", callback_data=f"list_{action}_{branch_name}")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(
-            text=f"👶 *Pilihan Masa {action_text}*\n\nNama: *{kid_name}*\nCawangan: *{branch_name}*",
-            reply_markup=reply_markup,
-            parse_mode="Markdown",
-        )
+        await query.edit_message_text(text=f"👶 *Pilihan Masa {action_text}*\n\nNama: *{kid_name}*\nCawangan: *{branch_name}*", reply_markup=reply_markup, parse_mode="Markdown")
 
     elif data.startswith("kidact_auto_"):
         parts = data.split("_", 4)
@@ -320,7 +330,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         time_str = now.strftime('%I:%M %p')
         action_text = "Check-In Anak" if action == "in" else "Check-Out Anak"
 
-        # Kemaskini Status Kehadiran
         attendance_status[kid_name] = {"status": action, "time": time_str}
 
         keyboard = [[InlineKeyboardButton("🔙 Menu Anak", callback_data=f"menu_kids_{branch_name}")]]
@@ -345,6 +354,87 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "kid": parts[4],
         }
         await query.edit_message_text(text=f"✏️ *Edit Masa Manual* untuk *{parts[4]}*:\n*(Contoh: 08:15 AM)*", parse_mode="Markdown")
+
+    # ==========================================
+    # 👩‍🏫 PENGURUSAN STAFF (SENARAI NAMA & KUNCI MERAH)
+    # ==========================================
+    elif data.startswith("menu_staff_"):
+        branch_name = data.replace("menu_staff_", "")
+        keyboard = [
+            [
+                InlineKeyboardButton("🟢 Clock-In Staff", callback_data=f"slist_in_{branch_name}"),
+                InlineKeyboardButton("🔴 Clock-Out Staff", callback_data=f"slist_out_{branch_name}")
+            ],
+            [InlineKeyboardButton("🔙 Kembali", callback_data=f"branch_{branch_name}")],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(text=f"👩‍🏫 *Kehadiran Staff* ({branch_name}):", reply_markup=reply_markup, parse_mode="Markdown")
+
+    # PAPARAN SENARAI STAFF DENGAN WARNA MERAH JIKA SUDAH CLOCK-IN
+    elif data.startswith("slist_in_") or data.startswith("slist_out_"):
+        action = "in" if "slist_in_" in data else "out"
+        branch_name = data.replace("slist_in_", "").replace("slist_out_", "")
+        action_label = "Clock-In" if action == "in" else "Clock-Out"
+        staff_list = get_staff_for_branch(branch_name)
+
+        keyboard = []
+        if staff_list:
+            for sname in staff_list:
+                s_rec = staff_attendance_status.get(sname, {})
+                c_st = s_rec.get("status", "out")
+
+                if c_st == "in":
+                    s_label = f"🔴 {sname} (Sudah Clock-In)"
+                else:
+                    s_label = f"👩‍🏫 {sname}"
+
+                keyboard.append([InlineKeyboardButton(s_label, callback_data=f"staffselect_{action}_{branch_name}_{sname}")])
+        else:
+            keyboard.append([InlineKeyboardButton("⚠️ Tiada senarai staff (Semak Render)", callback_data="none")])
+
+        keyboard.append([InlineKeyboardButton("🔙 Kembali", callback_data=f"menu_staff_{branch_name}")])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(text=f"👩‍🏫 *Pilih Nama Staff untuk {action_label}* ({branch_name}):", reply_markup=reply_markup, parse_mode="Markdown")
+
+    # KAWALAN HALANGAN CLOCK-IN STAFF 2 KALI
+    elif data.startswith("staffselect_"):
+        parts = data.split("_", 3)
+        action, branch_name, staff_name = parts[1], parts[2], parts[3]
+        
+        s_rec = staff_attendance_status.get(staff_name, {})
+        c_st = s_rec.get("status", "out")
+
+        if action == "in" and c_st == "in":
+            keyboard = [[InlineKeyboardButton("🔙 Kembali", callback_data=f"slist_in_{branch_name}")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(
+                text=f"🛑 *AMARAN: CLOCK-IN DIBLOK!*\n\n"
+                     f"🔴 *{staff_name}* sudah pun Clock-In pada jam *{s_rec.get('time', '-') }*!\n\n"
+                     f"Tidak boleh Clock-In kali kedua.",
+                reply_markup=reply_markup,
+                parse_mode="Markdown"
+            )
+            return
+
+        now = datetime.now(MY_TZ)
+        time_str = now.strftime('%I:%M %p')
+        action_text = "Clock-In Staff" if action == "in" else "Clock-Out Staff"
+
+        # Kemaskini Status Staff
+        staff_attendance_status[staff_name] = {"status": action, "time": time_str}
+
+        keyboard = [[InlineKeyboardButton("🔙 Menu Staff", callback_data=f"menu_staff_{branch_name}")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            text=f"✅ *Kehadiran Staff Direkodkan!*\n\n"
+                 f"👩‍🏫 Staff: *{staff_name}*\n"
+                 f"📍 Cawangan: *{branch_name}*\n"
+                 f"📝 Status: *{'🟢 Clock-In' if action=='in' else '🔴 Clock-Out'}*\n"
+                 f"⏰ Masa: *{time_str}*\n"
+                 f"📅 Tarikh: *{now.strftime('%d/%m/%Y')}*",
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
+        )
 
     elif data == "back_to_branches":
         keyboard = [[InlineKeyboardButton(f"🏢 {branch}", callback_data=f"branch_{branch}")] for branch in BRANCHES]
