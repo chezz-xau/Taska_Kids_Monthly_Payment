@@ -616,7 +616,7 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         cur = conn.cursor()
         
-        # Ambil data yuran + padankan cawangan (jika tiada cawangan, automatik ke 'Taska Utama')
+        # Ambil data yuran + padankan cawangan
         cur.execute("""
             SELECT f.kid_name, f.total_yuran, f.bayar_hari_ini, f.total_paid, 
                    COALESCE(k.branch_name, 'Taska Utama') AS branch_name
@@ -640,7 +640,7 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
             yuran = float(r['total_yuran'])
             paid = float(r['total_paid'])
             baki = max(0.0, yuran - paid)
-            status = "✅ Lunas" if baki <= 0 and yuran > 0 else "❌ Belum Lunas"
+            status_icon = "✅" if baki <= 0 and yuran > 0 else "❌"
             branch = r['branch_name']
 
             if branch not in branch_data:
@@ -657,15 +657,15 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 "yuran": yuran,
                 "paid": paid,
                 "baki": baki,
-                "status": status
+                "icon": status_icon
             })
             branch_data[branch]["sub_yuran"] += yuran
             branch_data[branch]["sub_paid"] += paid
             branch_data[branch]["sub_baki"] += baki
-            if status == "✅ Lunas":
+            if baki <= 0 and yuran > 0:
                 branch_data[branch]["sub_lunas"] += 1
 
-        # Bina Mesej Laporan Mengikut Cawangan Taska Dengan Paparan Jumlah Anak Jelas
+        # Bina Mesej Laporan Mengikut Cawangan Taska
         now = datetime.now(MY_TZ)
         report_msg = f"📊 *LAPORAN YURAN BULANAN ({now.strftime('%m/%Y')})*\n"
         report_msg += f"───────────────────────\n\n"
@@ -677,10 +677,12 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
             report_msg += f"───────────────────────\n"
             
             for k in b_info["kids"]:
+                # Tambah garisan kecil di bawah setiap butiran anak
                 report_msg += (
-                    f" • *{k['kid']}*\n"
+                    f" {k['icon']} *{k['kid']}*\n"
                     f"    - Dibayar: RM {k['paid']:.2f} / RM {k['yuran']:.2f}\n"
-                    f"    - Baki: RM {k['baki']:.2f} ({k['status']})\n"
+                    f"    - Baki: RM {k['baki']:.2f}\n"
+                    f"    ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n"
                 )
             
             # Ringkasan/Collection Khusus Cawangan Ini
@@ -722,7 +724,6 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 conn = get_db_connection()
                 if conn:
                     cur = conn.cursor()
-                    # Kemaskini cawangan jika nama sudah wujud, atau masukkan baru jika belum ada
                     cur.execute("""
                         INSERT INTO kids (branch_name, kid_name) VALUES (%s, %s)
                         ON CONFLICT (kid_name) 
