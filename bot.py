@@ -209,9 +209,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if is_owner:
         keyboard = [
             [InlineKeyboardButton("📋 Kehadiran", callback_data="owner_menu_kehadiran")],
-            [InlineKeyboardButton("💳 Status & Bayaran Yuran", callback_data="owner_select_branch_yuran")],
-            [InlineKeyboardButton("📝 Pendaftaran Baru Anak-Anak", callback_data="owner_select_branch_register")],
-            [InlineKeyboardButton("❌ Keluarkan Dari Senarai", callback_data="owner_select_branch_delete")]
+            [InlineKeyboardButton("📊 Laporan Harian", callback_data="owner_menu_laporan_harian")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text(
@@ -249,6 +247,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=reply_markup,
             parse_mode="Markdown",
         )
+
+    elif data == "owner_menu_laporan_harian":
+        now = datetime.now(MY_TZ)
+        keyboard = [
+            [InlineKeyboardButton("📋 Kehadiran Anak", callback_data="owner_attendance_kids")],
+            [InlineKeyboardButton("👩‍🏫 Kehadiran Staff", callback_data="owner_attendance_staff")],
+            [InlineKeyboardButton("🔙 Kembali", callback_data="owner_main_menu")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(text=f"📊 *Ringkasan Laporan Harian* ({now.strftime('%d/%m/%Y')}):", reply_markup=reply_markup, parse_mode="Markdown")
 
     elif data == "owner_attendance_kids":
         keyboard = [[InlineKeyboardButton("🔙 Kembali", callback_data="owner_menu_kehadiran")]]
@@ -296,22 +304,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await query.edit_message_text(text=staff_text, reply_markup=reply_markup, parse_mode="Markdown")
 
-    elif data == "owner_select_branch_register":
-        keyboard = [[InlineKeyboardButton(f"🏢 {branch}", callback_data=f"reg_br_{branch}")] for branch in BRANCHES]
-        keyboard.append([InlineKeyboardButton("🔙 Kembali", callback_data="owner_main_menu")])
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(text="📝 *Pendaftaran Baru Anak-Anak*", reply_markup=reply_markup, parse_mode="Markdown")
-
     elif data.startswith("reg_br_"):
         branch_name = data.replace("reg_br_", "")
         user_sessions[user_id] = {"mode": "register_kid_name", "branch": branch_name}
         await query.edit_message_text(text=f"📝 *Pendaftaran Baru* ({branch_name})\n\nTaip nama anak baharu:", parse_mode="Markdown")
-
-    elif data == "owner_select_branch_delete":
-        keyboard = [[InlineKeyboardButton(f"🏢 {branch}", callback_data=f"del_br_{branch}")] for branch in BRANCHES]
-        keyboard.append([InlineKeyboardButton("🔙 Kembali", callback_data="owner_main_menu")])
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(text="❌ *Pilih Cawangan untuk Keluarkan Dari Senarai*:", reply_markup=reply_markup, parse_mode="Markdown")
 
     elif data.startswith("del_br_"):
         branch_name = data.replace("del_br_", "")
@@ -322,7 +318,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 keyboard.append([InlineKeyboardButton(f"🗑️ {kid}", callback_data=f"del_confirm_{branch_name}_{kid}")])
         else:
             keyboard.append([InlineKeyboardButton("⚠️ Tiada senarai anak", callback_data="none")])
-        keyboard.append([InlineKeyboardButton("🔙 Kembali", callback_data="owner_select_branch_delete")])
+        keyboard.append([InlineKeyboardButton("🔙 Kembali", callback_data="owner_main_menu")])
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(text=f"❌ *Pilih Anak untuk Dikeluarkan* ({branch_name}):", reply_markup=reply_markup, parse_mode="Markdown")
 
@@ -348,12 +344,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
 
-    elif data == "owner_select_branch_yuran":
-        keyboard = [[InlineKeyboardButton(f"🏢 {branch}", callback_data=f"yuran_br_{branch}")] for branch in BRANCHES]
-        keyboard.append([InlineKeyboardButton("🔙 Kembali", callback_data="owner_main_menu")])
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(text="💳 *Pengurusan Yuran*", reply_markup=reply_markup, parse_mode="Markdown")
-
     elif data.startswith("yuran_br_"):
         branch_name = data.replace("yuran_br_", "")
         kids_list = get_kids_for_branch(branch_name)
@@ -363,7 +353,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 keyboard.append([InlineKeyboardButton(f"👤 {kid}", callback_data=f"yuran_kid_{branch_name}_{kid}")])
         else:
             keyboard.append([InlineKeyboardButton("⚠️ Tiada senarai anak", callback_data="none")])
-        keyboard.append([InlineKeyboardButton("🔙 Kembali", callback_data="owner_select_branch_yuran")])
+        keyboard.append([InlineKeyboardButton("🔙 Kembali", callback_data="owner_main_menu")])
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(text=f"💳 *Pilih Anak* ({branch_name}):", reply_markup=reply_markup, parse_mode="Markdown")
 
@@ -410,9 +400,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "owner_main_menu":
         keyboard = [
             [InlineKeyboardButton("📋 Kehadiran", callback_data="owner_menu_kehadiran")],
-            [InlineKeyboardButton("💳 Status & Bayaran Yuran", callback_data="owner_select_branch_yuran")],
-            [InlineKeyboardButton("📝 Pendaftaran Baru Anak-Anak", callback_data="owner_select_branch_register")],
-            [InlineKeyboardButton("❌ Keluarkan Dari Senarai", callback_data="owner_select_branch_delete")]
+            [InlineKeyboardButton("📊 Laporan Harian", callback_data="owner_menu_laporan_harian")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         if query:
@@ -626,6 +614,7 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     elif "Pendaftaran Baru" in input_text:
         keyboard = [[InlineKeyboardButton(f"🏢 {branch}", callback_data=f"reg_br_{branch}")] for branch in BRANCHES]
+        keyboard.append([InlineKeyboardButton("🔙 Kembali", callback_data="owner_main_menu")])
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text("📝 *Pendaftaran Baru Anak-Anak*:", reply_markup=reply_markup, parse_mode="Markdown")
         return
@@ -645,6 +634,7 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     elif "Status & Bayaran Yuran" in input_text:
         keyboard = [[InlineKeyboardButton(f"🏢 {branch}", callback_data=f"yuran_br_{branch}")] for branch in BRANCHES]
+        keyboard.append([InlineKeyboardButton("🔙 Kembali", callback_data="owner_main_menu")])
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text("💳 *Pengurusan Yuran*:", reply_markup=reply_markup, parse_mode="Markdown")
         return
@@ -652,7 +642,8 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
     elif "Laporan Harian" in input_text:
         keyboard = [
             [InlineKeyboardButton("📋 Kehadiran Anak", callback_data="owner_attendance_kids")],
-            [InlineKeyboardButton("👩‍🏫 Kehadiran Staff", callback_data="owner_attendance_staff")]
+            [InlineKeyboardButton("👩‍🏫 Kehadiran Staff", callback_data="owner_attendance_staff")],
+            [InlineKeyboardButton("🔙 Kembali", callback_data="owner_main_menu")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text(f"📊 *Ringkasan Laporan Harian* ({now.strftime('%d/%m/%Y')}):", reply_markup=reply_markup, parse_mode="Markdown")
