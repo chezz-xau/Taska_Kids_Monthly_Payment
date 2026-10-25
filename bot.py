@@ -208,7 +208,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if is_owner:
         keyboard = [
-            [InlineKeyboardButton("📋 Kehadiran", callback_data="owner_menu_kehadiran")],
             [InlineKeyboardButton("📊 Laporan Harian", callback_data="owner_menu_laporan_harian")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -235,20 +234,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     user_id = update.effective_user.id
 
-    if data == "owner_menu_kehadiran":
-        keyboard = [
-            [InlineKeyboardButton("👶 1. Anak", callback_data="owner_attendance_kids")],
-            [InlineKeyboardButton("👩‍🏫 2. Staff", callback_data="owner_attendance_staff")],
-            [InlineKeyboardButton("🔙 Kembali", callback_data="owner_main_menu")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(
-            text="📋 *Laporan Kehadiran*\n\nSila pilih jenis kehadiran:",
-            reply_markup=reply_markup,
-            parse_mode="Markdown",
-        )
-
-    elif data == "owner_menu_laporan_harian":
+    if data == "owner_menu_laporan_harian":
         now = datetime.now(MY_TZ)
         keyboard = [
             [InlineKeyboardButton("📋 Kehadiran Anak", callback_data="owner_attendance_kids")],
@@ -259,7 +245,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text=f"📊 *Ringkasan Laporan Harian* ({now.strftime('%d/%m/%Y')}):", reply_markup=reply_markup, parse_mode="Markdown")
 
     elif data == "owner_attendance_kids":
-        keyboard = [[InlineKeyboardButton("🔙 Kembali", callback_data="owner_menu_kehadiran")]]
+        keyboard = [[InlineKeyboardButton("🔙 Kembali", callback_data="owner_menu_laporan_harian")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         report_text = "👶 *Laporan Kehadiran Anak (Semua Taska)*\n───────────────────────\n"
@@ -282,7 +268,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text=report_text, reply_markup=reply_markup, parse_mode="Markdown")
 
     elif data == "owner_attendance_staff":
-        keyboard = [[InlineKeyboardButton("🔙 Kembali", callback_data="owner_menu_kehadiran")]]
+        keyboard = [[InlineKeyboardButton("🔙 Kembali", callback_data="owner_menu_laporan_harian")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         staff_text = "👩‍🏫 *Rekod Kehadiran Staff (Semua Taska)*\n───────────────────────\n"
@@ -318,7 +304,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 keyboard.append([InlineKeyboardButton(f"🗑️ {kid}", callback_data=f"del_confirm_{branch_name}_{kid}")])
         else:
             keyboard.append([InlineKeyboardButton("⚠️ Tiada senarai anak", callback_data="none")])
-        keyboard.append([InlineKeyboardButton("🔙 Kembali", callback_data="owner_main_menu")])
+        keyboard.append([InlineKeyboardButton("🔙 Kembali", callback_data="owner_select_branch_delete")])
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(text=f"❌ *Pilih Anak untuk Dikeluarkan* ({branch_name}):", reply_markup=reply_markup, parse_mode="Markdown")
 
@@ -353,7 +339,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 keyboard.append([InlineKeyboardButton(f"👤 {kid}", callback_data=f"yuran_kid_{branch_name}_{kid}")])
         else:
             keyboard.append([InlineKeyboardButton("⚠️ Tiada senarai anak", callback_data="none")])
-        keyboard.append([InlineKeyboardButton("🔙 Kembali", callback_data="owner_main_menu")])
+        keyboard.append([InlineKeyboardButton("🔙 Kembali", callback_data="owner_select_branch_yuran")])
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(text=f"💳 *Pilih Anak* ({branch_name}):", reply_markup=reply_markup, parse_mode="Markdown")
 
@@ -399,7 +385,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "owner_main_menu":
         keyboard = [
-            [InlineKeyboardButton("📋 Kehadiran", callback_data="owner_menu_kehadiran")],
             [InlineKeyboardButton("📊 Laporan Harian", callback_data="owner_menu_laporan_harian")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
