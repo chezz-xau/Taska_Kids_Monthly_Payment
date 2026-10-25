@@ -210,7 +210,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [
             [InlineKeyboardButton("📋 Kehadiran", callback_data="owner_menu_kehadiran")],
             [InlineKeyboardButton("💳 Status & Bayaran Yuran", callback_data="owner_select_branch_yuran")],
-            [InlineKeyboardButton("📝 Pendaftaran Baru Anak-Anak", callback_data="owner_select_branch_register")]
+            [InlineKeyboardButton("📝 Pendaftaran Baru Anak-Anak", callback_data="owner_select_branch_register")],
+            [InlineKeyboardButton("❌ Keluarkan Dari Senarai", callback_data="owner_select_branch_delete")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text(
@@ -306,6 +307,47 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_sessions[user_id] = {"mode": "register_kid_name", "branch": branch_name}
         await query.edit_message_text(text=f"📝 *Pendaftaran Baru* ({branch_name})\n\nTaip nama anak baharu:", parse_mode="Markdown")
 
+    elif data == "owner_select_branch_delete":
+        keyboard = [[InlineKeyboardButton(f"🏢 {branch}", callback_data=f"del_br_{branch}")] for branch in BRANCHES]
+        keyboard.append([InlineKeyboardButton("🔙 Kembali", callback_data="owner_main_menu")])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(text="❌ *Pilih Cawangan untuk Keluarkan Dari Senarai*:", reply_markup=reply_markup, parse_mode="Markdown")
+
+    elif data.startswith("del_br_"):
+        branch_name = data.replace("del_br_", "")
+        kids_list = get_kids_for_branch(branch_name)
+        keyboard = []
+        if kids_list:
+            for kid in kids_list:
+                keyboard.append([InlineKeyboardButton(f"🗑️ {kid}", callback_data=f"del_confirm_{branch_name}_{kid}")])
+        else:
+            keyboard.append([InlineKeyboardButton("⚠️ Tiada senarai anak", callback_data="none")])
+        keyboard.append([InlineKeyboardButton("🔙 Kembali", callback_data="owner_select_branch_delete")])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(text=f"❌ *Pilih Anak untuk Dikeluarkan* ({branch_name}):", reply_markup=reply_markup, parse_mode="Markdown")
+
+    elif data.startswith("del_confirm_"):
+        parts = data.split("_", 3)
+        branch_name, kid_name = parts[2], parts[3]
+        
+        conn = get_db_connection()
+        if conn:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM kids WHERE LOWER(kid_name) = LOWER(%s);", (kid_name,))
+            cur.execute("DELETE FROM fees WHERE LOWER(kid_name) = LOWER(%s);", (kid_name,))
+            cur.execute("DELETE FROM attendance WHERE LOWER(person_name) = LOWER(%s);", (kid_name,))
+            conn.commit()
+            cur.close()
+            conn.close()
+
+        keyboard = [[InlineKeyboardButton("🔙 Kembali ke Dashboard", callback_data="owner_main_menu")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            text=f"✅ *Berjaya Dikeluarkan!*\n\n👶 Nama: *{kid_name}*\n📍 Cawangan: *{branch_name}*\n\nTelah dipadamkan sepenuhnya daripada sistem pangkalan data.",
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
+        )
+
     elif data == "owner_select_branch_yuran":
         keyboard = [[InlineKeyboardButton(f"🏢 {branch}", callback_data=f"yuran_br_{branch}")] for branch in BRANCHES]
         keyboard.append([InlineKeyboardButton("🔙 Kembali", callback_data="owner_main_menu")])
@@ -369,7 +411,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [
             [InlineKeyboardButton("📋 Kehadiran", callback_data="owner_menu_kehadiran")],
             [InlineKeyboardButton("💳 Status & Bayaran Yuran", callback_data="owner_select_branch_yuran")],
-            [InlineKeyboardButton("📝 Pendaftaran Baru Anak-Anak", callback_data="owner_select_branch_register")]
+            [InlineKeyboardButton("📝 Pendaftaran Baru Anak-Anak", callback_data="owner_select_branch_register")],
+            [InlineKeyboardButton("❌ Keluarkan Dari Senarai", callback_data="owner_select_branch_delete")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         if query:
@@ -587,6 +630,13 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("📝 *Pendaftaran Baru Anak-Anak*:", reply_markup=reply_markup, parse_mode="Markdown")
         return
 
+    elif "Keluarkan Dari Senarai" in input_text:
+        keyboard = [[InlineKeyboardButton(f"🏢 {branch}", callback_data=f"del_br_{branch}")] for branch in BRANCHES]
+        keyboard.append([InlineKeyboardButton("🔙 Kembali", callback_data="owner_main_menu")])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text("❌ *Pilih Cawangan untuk Keluarkan Dari Senarai*:", reply_markup=reply_markup, parse_mode="Markdown")
+        return
+
     elif "Edit Masa Manual" in input_text:
         keyboard = [[InlineKeyboardButton(f"🏢 {branch}", callback_data=f"branch_{branch}")] for branch in BRANCHES]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -677,7 +727,6 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
             report_msg += f"───────────────────────\n"
             
             for k in b_info["kids"]:
-                # Tambah garisan kecil di bawah setiap butiran anak
                 report_msg += (
                     f" {k['icon']} *{k['kid']}*\n"
                     f"    - Dibayar: RM {k['paid']:.2f} / RM {k['yuran']:.2f}\n"
@@ -685,7 +734,6 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     f"    ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n"
                 )
             
-            # Ringkasan/Collection Khusus Cawangan Ini
             report_msg += (
                 f"\n📌 *Collection ({b_name}):*\n"
                 f"   👥 Jumlah Anak: {total_kids} Orang ({b_info['sub_lunas']} Lunas)\n"
