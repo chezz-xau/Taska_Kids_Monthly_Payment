@@ -705,7 +705,7 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
             for k in b_info["kids"]:
                 report_msg += (
                     f" {k['icon']} *{k['kid']}*\n"
-                    f"    - Dibayar: RM {k['paid']:.2f} / RM {k['yuran']:.2f}\n"
+                    f"    - Bayar: RM {k['paid']:.2f} / RM {k['yuran']:.2f}\n"
                     f"    - Baki: RM {k['baki']:.2f}\n"
                     f"    ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n"
                 )
