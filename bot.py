@@ -264,6 +264,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 branch_has_kid = True
             if not branch_has_kid:
                 report_text += "  _(Tiada senarai anak)_\n"
+            report_text += "───────────────────────\n"
 
         await query.edit_message_text(text=report_text, reply_markup=reply_markup, parse_mode="Markdown")
 
@@ -287,6 +288,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 branch_has_staff = True
             if not branch_has_staff:
                 staff_text += "  _(Tiada senarai staff)_\n"
+            staff_text += "───────────────────────\n"
 
         await query.edit_message_text(text=staff_text, reply_markup=reply_markup, parse_mode="Markdown")
 
