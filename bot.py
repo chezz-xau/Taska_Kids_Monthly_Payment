@@ -665,13 +665,17 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
             if status == "✅ Lunas":
                 branch_data[branch]["sub_lunas"] += 1
 
-        # Bina Mesej Laporan Mengikut Cawangan Taska Sahaja
+        # Bina Mesej Laporan Mengikut Cawangan Taska Dengan Paparan Jumlah Anak Jelas
         now = datetime.now(MY_TZ)
         report_msg = f"📊 *LAPORAN YURAN BULANAN ({now.strftime('%m/%Y')})*\n"
         report_msg += f"───────────────────────\n\n"
 
         for b_name, b_info in branch_data.items():
+            total_kids = len(b_info["kids"])
             report_msg += f"🏢 *{b_name.upper()}*\n"
+            report_msg += f"👥 *Jumlah Keseluruhan Anak:* {total_kids} Orang\n"
+            report_msg += f"───────────────────────\n"
+            
             for k in b_info["kids"]:
                 report_msg += (
                     f" • *{k['kid']}*\n"
@@ -682,7 +686,7 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
             # Ringkasan/Collection Khusus Cawangan Ini
             report_msg += (
                 f"\n📌 *Collection ({b_name}):*\n"
-                f"   👥 Jumlah Anak: {len(b_info['kids'])} Orang ({b_info['sub_lunas']} Lunas)\n"
+                f"   👥 Jumlah Anak: {total_kids} Orang ({b_info['sub_lunas']} Lunas)\n"
                 f"   💵 Sasaran Yuran: RM {b_info['sub_yuran']:.2f}\n"
                 f"   💰 Total Kutipan: RM {b_info['sub_paid']:.2f}\n"
                 f"   ⚠️ Baki Belum Bayar: RM {b_info['sub_baki']:.2f}\n"
@@ -827,4 +831,3 @@ if __name__ == "__main__":
 
     print("Bot Taska sedang aktif berjalan...")
     application.run_polling()
-
