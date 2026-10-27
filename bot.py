@@ -76,7 +76,7 @@ def init_db():
     ''')
     conn.commit()
     
-    # Masukkan data permulaan jika jadual kosong
+    # Masukkan data permulaan jika jadual kosong untuk memastikan Taska Hadhari mempunyai rekod awal
     cur.execute('SELECT COUNT(*) FROM kids_fees')
     if cur.fetchone()[0] == 0:
         default_data = [
@@ -101,7 +101,8 @@ init_db()
 def db_get_kids(branch):
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute('SELECT kid_name FROM kids_fees WHERE branch = %s', (branch,))
+    # Gunakan ILIKE atau TRIM untuk memastikan carian cawangan tepat tanpa isu huruf besar/kecil
+    cur.execute('SELECT kid_name FROM kids_fees WHERE LOWER(TRIM(branch)) = LOWER(TRIM(%s))', (branch,))
     rows = cur.fetchall()
     cur.close()
     conn.close()
@@ -110,7 +111,7 @@ def db_get_kids(branch):
 def db_get_kid_fee(branch, kid_name):
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute('SELECT perlu, dibayar FROM kids_fees WHERE branch = %s AND kid_name = %s', (branch, kid_name))
+    cur.execute('SELECT perlu, dibayar FROM kids_fees WHERE LOWER(TRIM(branch)) = LOWER(TRIM(%s)) AND LOWER(TRIM(kid_name)) = LOWER(TRIM(%s))', (branch, kid_name))
     row = cur.fetchone()
     cur.close()
     conn.close()
@@ -134,7 +135,7 @@ def db_save_kid_fee(branch, kid_name, perlu, dibayar):
 def db_remove_kid(branch, kid_name):
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute('DELETE FROM kids_fees WHERE branch = %s AND kid_name = %s', (branch, kid_name))
+    cur.execute('DELETE FROM kids_fees WHERE LOWER(TRIM(branch)) = LOWER(TRIM(%s)) AND LOWER(TRIM(kid_name)) = LOWER(TRIM(%s))', (branch, kid_name))
     conn.commit()
     cur.close()
     conn.close()
