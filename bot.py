@@ -1,154 +1,273 @@
 import sqlite3
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import (
-    CallbackContext,
-    CallbackQueryHandler,
-    CommandHandler,
-    Updater,
-)
+import telebot
+from telebot import types
+
+# Gantikan "TOKEN_BOT_ANDA_DI_SINI" dengan token sebenar bot Telegram anda
+TOKEN = "TOKEN_BOT_ANDA_DI_SINI"
+bot = telebot.TeleBot(TOKEN)
+
 
 # --- 1. SETUP DATABASE SQLITE ---
 def init_db():
-    conn = sqlite3.connect("taska.db")
-    cursor = conn.cursor()
-    # Buat jadual pelajar jika belum ada, lengkap dengan kolum cawangan dan status bayaran
-    cursor.execute(
-        """
+  conn = sqlite3.connect("taska.db")
+  cursor = conn.cursor()
+  cursor.execute("""
         CREATE TABLE IF NOT EXISTS pelajar (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             nama TEXT,
             cawangan TEXT,
             status_bayaran TEXT DEFAULT 'Belum Bayar'
         )
-    """
+    """)
+  conn.commit()
+
+  # Masukkan data contoh (dummy data) jika database kosong supaya nampak senarai nanti
+  cursor.execute("SELECT COUNT(*) FROM pelajar")
+  if cursor.fetchone()[0] == 0:
+    sample_data = [
+        ("Ali bin Abu", "Taska Corner", "Lunas"),
+        ("Siti binti Omar", "Taska Corner", "Belum Bayar"),
+        ("Ahmad bin Ali", "Taska Hadhari", "Lunas"),
+        ("Fatima binti Hassan", "Taska Hadhari", "Belum Bayar"),
+    ]
+    cursor.executemany(
+        "INSERT INTO pelajar (nama, cawangan, status_bayaran) VALUES (?, ?, ?)",
+        sample_data,
     )
     conn.commit()
-    conn.close()
+  conn.close()
 
-# --- 2. MENU UTAMA / LAPORAN PEMBAYARAN ---
-def menu_laporan_pembayaran(update: Update, context: CallbackContext):
-    query = update.callback_query
-    query.answer()
 
-    keyboard = [
-        [InlineKeyboardButton("🏡 Taska Corner", callback_data="cawangan_corner")],
-        [InlineKeyboardButton("🏫 Taska Hadhari", callback_data="cawangan_hadhari")],
-        [InlineKeyboardButton("🔙 Menu Utama", callback_data="menu_utama")],
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+init_db()
 
-    query.edit_message_text(
-        "🏢 **Sila pilih cawangan Taska untuk semakan yuran:**",
-        reply_markup=reply_markup,
+
+# --- 2. COMMAND /START & MENU UTAMA ---
+@bot.message_handler(commands=["start"])
+def send_welcome(message):
+  markup = types.InlineKeyboardMarkup()
+  markup.add(types.InlineKeyboardButton("📊 Laporan", callback_data="menu_laporan"))
+  markup.add(
+      types.InlineKeyboardButton(
+          "⏰ Late Pick Up Charges", callback_data="late_pickup"
+      )
+  )
+  markup.add(
+      types.InlineKeyboardButton(
+          "📝 Pendaftaran Baru Anak-Anak", callback_data="pendaftaran"
+      )
+  )
+  markup.add(
+      types.InlineKeyboardButton(
+          "❌ Keluarkan Dari Senarai", callback_data="keluarkan"
+      )
+  )
+
+  bot.send_message(
+      message.chat.id,
+      "🤖 **Selamat Datang ke Taska Bot**\nSila pilih menu tindakan di bawah:",
+      reply_markup=markup,
+      parse_mode="Markdown",
+  )
+
+
+# --- 3. MENU LAPORAN ---
+@bot.callback_query_handler(
+    func=lambda call: call.data == "menu_laporan" or call.data == "menu_utama"
+)
+def menu_laporan(call):
+  markup = types.InlineKeyboardMarkup()
+  markup.add(
+      types.InlineKeyboardButton(
+          "📅 Laporan Harian", callback_data="laporan_harian"
+      )
+  )
+  markup.add(
+      types.InlineKeyboardButton(
+          "💳 Laporan Pembayaran", callback_data="menu_pembayaran"
+      )
+  )
+  markup.add(
+      types.InlineKeyboardButton("🔙 Menu Utama", callback_data="back_start")
+  )
+
+  try:
+    bot.edit_message_text(
+        "📊 **Menu Laporan**\nSila pilih jenis laporan yang ingin dilihat:",
+        call.message.chat.id,
+        call.message.message_id,
+        reply_markup=markup,
+        parse_mode="Markdown",
+    )
+  except Exception:
+    bot.send_message(
+        call.message.chat.id,
+        "📊 **Menu Laporan**\nSila pilih jenis laporan yang ingin dilihat:",
+        reply_markup=markup,
         parse_mode="Markdown",
     )
 
-# --- 3. PILIH STATUS BAYARAN MENGIKUT CAWANGAN ---
-def pilih_cawangan(update: Update, context: CallbackContext):
-    query = update.callback_query
-    query.answer()
 
-    data = query.data  # cawangan_corner atau cawangan_hadhari
-    cawangan_name = "Taska Corner" if "corner" in data else "Taska Hadhari"
-    cawangan_key = "corner" if "corner" in data else "hadhari"
+@bot.callback_query_handler(func=lambda call: call.data == "back_start")
+def back_to_start(call):
+  markup = types.InlineKeyboardMarkup()
+  markup.add(types.InlineKeyboardButton("📊 Laporan", callback_data="menu_laporan"))
+  markup.add(
+      types.InlineKeyboardButton(
+          "⏰ Late Pick Up Charges", callback_data="late_pickup"
+      )
+  )
+  markup.add(
+      types.InlineKeyboardButton(
+          "📝 Pendaftaran Baru Anak-Anak", callback_data="pendaftaran"
+      )
+  )
+  markup.add(
+      types.InlineKeyboardButton(
+          "❌ Keluarkan Dari Senarai", callback_data="keluarkan"
+      )
+  )
 
-    keyboard = [
-        [
-            InlineKeyboardButton(
-                "✅ Sudah Lunas", callback_data=f"status_lunas_{cawangan_key}"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "⏳ Belum Bayar", callback_data=f"status_belum_{cawangan_key}"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "🔙 Pilih Cawangan Lain", callback_data="menu_pembayaran"
-            )
-        ],
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+  bot.edit_message_text(
+      "🤖 **Selamat Datang ke Taska Bot**\nSila pilih menu tindakan di bawah:",
+      call.message.chat.id,
+      call.message.message_id,
+      reply_markup=markup,
+      parse_mode="Markdown",
+  )
 
-    query.edit_message_text(
-        f"📌 **{cawangan_name} - Status Yuran**\nSila pilih status bayaran:",
-        reply_markup=reply_markup,
-        parse_mode="Markdown",
-    )
 
-# --- 4. PAPAR SENARAI MENGIKUT STATUS & CAWANGAN ---
-def papar_senarai_status(update: Update, context: CallbackContext):
-    query = update.callback_query
-    query.answer()
+# --- 4. PILIH CAWANGAN UNTUK LAPORAN PEMBAYARAN ---
+@bot.callback_query_handler(func=lambda call: call.data == "menu_pembayaran")
+def menu_pembayaran(call):
+  markup = types.InlineKeyboardMarkup()
+  markup.add(
+      types.InlineKeyboardButton(
+          "🏡 Taska Corner", callback_data="cawangan_corner"
+      )
+  )
+  markup.add(
+      types.InlineKeyboardButton(
+          "🏫 Taska Hadhari", callback_data="cawangan_hadhari"
+      )
+  )
+  markup.add(
+      types.InlineKeyboardButton("🔙 Kembali", callback_data="menu_laporan")
+  )
 
-    data = query.data  # contoh: status_lunas_corner atau status_belum_hadhari
-    parts = data.split("_")
-    status_type = parts[1]  # lunas atau belum
-    cawangan_key = parts[2]  # corner atau hadhari
+  bot.edit_message_text(
+      "🏢 **Sila pilih cawangan Taska untuk semakan yuran:**",
+      call.message.chat.id,
+      call.message.message_id,
+      reply_markup=markup,
+      parse_mode="Markdown",
+  )
 
-    cawangan_name = "Taska Corner" if cawangan_key == "corner" else "Taska Hadhari"
-    status_text = "Sudah Lunas" if status_type == "lunas" else "Belum Bayar"
-    db_status = "Lunas" if status_type == "lunas" else "Belum Bayar"
 
-    # Semak database
-    conn = sqlite3.connect("taska.db")
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT nama FROM pelajar WHERE cawangan = ? AND status_bayaran = ?",
-        (cawangan_name, db_status),
-    )
-    senarai = cursor.fetchall()
-    conn.close()
+# --- 5. PILIH STATUS BAYARAN MENGIKUT CAWANGAN ---
+@bot.callback_query_handler(
+    func=lambda call: call.data in ["cawangan_corner", "cawangan_hadhari"]
+)
+def pilih_cawangan(call):
+  cawangan_key = "corner" if "corner" in call.data else "hadhari"
+  cawangan_name = "Taska Corner" if cawangan_key == "corner" else "Taska Hadhari"
 
-    # Bentukkan teks senarai
-    text = f"📋 **Senarai Pelajar ({cawangan_name}) - {status_text}:**\n\n"
-    if senarai:
-        for idx, row in enumerate(senarai, 1):
-            text += f"{idx}. {row[0]}\n"
-    else:
-        text += "_Tiada rekod dijumpai._\n"
+  markup = types.InlineKeyboardMarkup()
+  markup.add(
+      types.InlineKeyboardButton(
+          "✅ Sudah Lunas", callback_data=f"status_lunas_{cawangan_key}"
+      )
+  )
+  markup.add(
+      types.InlineKeyboardButton(
+          "⏳ Belum Bayar", callback_data=f"status_belum_{cawangan_key}"
+      )
+  )
+  markup.add(
+      types.InlineKeyboardButton(
+          "🔙 Pilih Cawangan Lain", callback_data="menu_pembayaran"
+      )
+  )
 
-    keyboard = [
-        [
-            InlineKeyboardButton(
-                "🔙 Kembali", callback_data=f"cawangan_{cawangan_key}"
-            )
-        ]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+  bot.edit_message_text(
+      f"📌 **{cawangan_name} - Status Yuran**\nSila pilih status bayaran:",
+      call.message.chat.id,
+      call.message.message_id,
+      reply_markup=markup,
+      parse_mode="Markdown",
+  )
 
-    query.edit_message_text(
-        text, reply_markup=reply_markup, parse_mode="Markdown"
-    )
 
-# --- 5. MAIN FUNCTION (CONTOH DAFTAR HANDLER) ---
-def main():
-    init_db()  # Mulakan database
+# --- 6. PAPAR SENARAI MENGIKUT STATUS & CAWANGAN ---
+@bot.callback_query_handler(func=lambda call: call.data.startswith("status_"))
+def papar_senarai_status(call):
+  parts = call.data.split("_")
+  status_type = parts[1]  # lunas atau belum
+  cawangan_key = parts[2]  # corner atau hadhari
 
-    # Masukkan TOKEN bot Telegram anda di sini
-    updater = Updater("TOKEN_BOT_ANDA_DI_SINI", use_context=True)
-    dispatcher = updater.dispatcher
+  cawangan_name = "Taska Corner" if cawangan_key == "corner" else "Taska Hadhari"
+  status_text = "Sudah Lunas" if status_type == "lunas" else "Belum Bayar"
+  db_status = "Lunas" if status_type == "lunas" else "Belum Bayar"
 
-    # Daftarkan Callback Query Handlers
-    dispatcher.add_handler(
-        CallbackQueryHandler(
-            menu_laporan_pembayaran, pattern="^menu_pembayaran$"
-        )
-    )
-    dispatcher.add_handler(
-        CallbackQueryHandler(
-            pilih_cawangan, pattern="^cawangan_(corner|hadhari)$"
-        )
-    )
-    dispatcher.add_handler(
-        CallbackQueryHandler(
-            papar_senarai_status, pattern="^status_(lunas|belum)_(corner|hadhari)$"
-        )
-    )
+  conn = sqlite3.connect("taska.db")
+  cursor = conn.cursor()
+  cursor.execute(
+      "SELECT nama FROM pelajar WHERE cawangan = ? AND status_bayaran = ?",
+      (cawangan_name, db_status),
+  )
+  senarai = cursor.fetchall()
+  conn.close()
 
-    updater.start_polling()
-    updater.idle()
+  text = f"📋 **Senarai Pelajar ({cawangan_name}) - {status_text}:**\n\n"
+  if senarai:
+    for idx, row in enumerate(senarai, 1):
+      text += f"{idx}. {row[0]}\n"
+  else:
+    text += "_Tiada rekod dijumpai._\n"
 
-if __name__ == "__main__":
-    main()
+  markup = types.InlineKeyboardMarkup()
+  markup.add(
+      types.InlineKeyboardButton(
+          "🔙 Kembali", callback_data=f"cawangan_{cawangan_key}"
+      )
+  )
+
+  bot.edit_message_text(
+      text,
+      call.message.chat.id,
+      call.message.message_id,
+      reply_markup=markup,
+      parse_mode="Markdown",
+  )
+
+
+# --- 7. PLACEHOLDER UNTUK MENU LAIN ---
+@bot.callback_query_handler(
+    func=lambda call: call.data
+    in ["laporan_harian", "late_pickup", "pendaftaran", "keluarkan"]
+)
+def menu_lain(call):
+  markup = types.InlineKeyboardMarkup()
+  markup.add(
+      types.InlineKeyboardButton("🔙 Menu Utama", callback_data="back_start")
+  )
+
+  feature_names = {
+      "laporan_harian": "Laporan Harian",
+      "late_pickup": "Late Pick Up Charges",
+      "pendaftaran": "Pendaftaran Baru Anak-Anak",
+      "keluarkan": "Keluarkan Dari Senarai",
+  }
+  title = feature_names.get(call.data, "Fungsi")
+
+  bot.edit_message_text(
+      f"🛠️ **{title}**\nBahagian ini sedang dalam pembangunan.",
+      call.message.chat.id,
+      call.message.message_id,
+      reply_markup=markup,
+      parse_mode="Markdown",
+  )
+
+
+# Jalankan bot
+print("Bot sedang berjalan...")
+bot.infinity_polling()
