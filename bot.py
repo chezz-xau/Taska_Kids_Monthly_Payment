@@ -280,7 +280,7 @@ def pendaftaran_mulai(call):
 
 def terima_nama_pendaftaran(message):
   if message.text.startswith("/"):
-    return  # Jika pengguna hantar command, abaikan atau batal
+    return
 
   nama_anak = message.text.strip()
   user_temp_data[message.chat.id] = nama_anak
@@ -323,7 +323,6 @@ def simpan_pendaftaran(call):
     )
     return
 
-  # Simpan ke Database Neon PostgreSQL
   conn = get_db_connection()
   cursor = conn.cursor()
   cursor.execute(
@@ -335,7 +334,6 @@ def simpan_pendaftaran(call):
   cursor.close()
   conn.close()
 
-  # Padam data sementara
   user_temp_data.pop(call.message.chat.id, None)
 
   markup = types.InlineKeyboardMarkup()
@@ -356,9 +354,88 @@ def simpan_pendaftaran(call):
   )
 
 
-# --- 9. PLACEHOLDER UNTUK MENU LAIN ---
+# --- 9. KELUARKAN DARI SENARAI (PADAM NAMA) ---
+@bot.callback_query_handler(func=lambda call: call.data == "keluarkan")
+def menu_keluarkan(call):
+  conn = get_db_connection()
+  cursor = conn.cursor()
+  cursor.execute("SELECT id, nama, cawangan FROM pelajar ORDER BY cawangan, nama")
+  pelajar_list = cursor.fetchall()
+  cursor.close()
+  conn.close()
+
+  markup = types.InlineKeyboardMarkup()
+  if pelajar_list:
+    for row in pelajar_list:
+      p_id, nama, cawangan = row
+      short_cawangan = "Corner" if cawangan == "Taska Corner" else "Hadhari"
+      markup.add(
+          types.InlineKeyboardButton(
+              f"❌ {nama} ({short_cawangan})", callback_data=f"del_{p_id}"
+          )
+      )
+  else:
+    bot.answer_callback_query(call.id, "Tiada rekod pelajar.", show_alert=True)
+    return
+
+  markup.add(types.InlineKeyboardButton("🔙 Menu Utama", callback_data="back_start"))
+
+  bot.edit_message_text(
+      "❌ **Buang Nama Pelajar**\n\nSila klik pada nama anak yang ingin"
+      " dikeluarkan dari senarai:",
+      call.message.chat.id,
+      call.message.message_id,
+      reply_markup=markup,
+      parse_mode="Markdown",
+  )
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("del_"))
+def proses_padam(call):
+  p_id = call.data.split("_")[1]
+
+  conn = get_db_connection()
+  cursor = conn.cursor()
+  # Ambil nama untuk paparan mesej pengesahan sebelum padam
+  cursor.execute("SELECT nama, cawangan FROM pelajar WHERE id = %s", (p_id,))
+  result = cursor.fetchone()
+
+  if result:
+    nama, cawangan = result
+    cursor.execute("DELETE FROM pelajar WHERE id = %s", (p_id,))
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+    markup = types.InlineKeyboardMarkup()
+    markup.add(
+        types.InlineKeyboardButton(
+            "❌ Buang Nama Lain", callback_data="keluarkan"
+        )
+    )
+    markup.add(
+        types.InlineKeyboardButton("🔙 Menu Utama", callback_data="back_start")
+    )
+
+    bot.edit_message_text(
+        f"🗑️ **Berjaya Dikeluarkan!**\n\nNama: *{nama}*\nCawangan:"
+        f" *{cawangan}* telah dipadam daripada sistem.",
+        call.message.chat.id,
+        call.message.message_id,
+        reply_markup=markup,
+        parse_mode="Markdown",
+    )
+  else:
+    cursor.close()
+    conn.close()
+    bot.answer_callback_query(
+        call.id, "Rekod tidak dijumpai atau sudah dipadam.", show_alert=True
+    )
+
+
+# --- 10. PLACEHOLDER UNTUK MENU LAIN ---
 @bot.callback_query_handler(
-    func=lambda call: call.data in ["laporan_harian", "late_pickup", "keluarkan"]
+    func=lambda call: call.data in ["laporan_harian", "late_pickup"]
 )
 def menu_lain(call):
   markup = types.InlineKeyboardMarkup()
@@ -369,7 +446,6 @@ def menu_lain(call):
   feature_names = {
       "laporan_harian": "Laporan Harian",
       "late_pickup": "Late Pick Up Charges",
-      "keluarkan": "Keluarkan Dari Senarai",
   }
   title = feature_names.get(call.data, "Fungsi")
 
@@ -382,7 +458,7 @@ def menu_lain(call):
   )
 
 
-# --- 10. MENJALANKAN APLIKASI WEBHOOK ---
+# --- 11. MENJALANKAN APLIKASI WEBHOOK ---
 if __name__ == "__main__":
   render_url = os.environ.get("RENDER_EXTERNAL_URL")
   if render_url:
