@@ -3,7 +3,7 @@ import telebot
 from telebot import types
 
 # Gantikan "TOKEN_BOT_ANDA_DI_SINI" dengan token sebenar bot Telegram anda
-TOKEN = "TOKEN_BOT_ANDA_DI_SINI"
+TOKEN = "8675996323:AAED9mwgb2VDGc7gitPAdEbhBbIq1hNCa8A"
 bot = telebot.TeleBot(TOKEN)
 
 
