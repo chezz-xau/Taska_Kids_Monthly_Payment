@@ -192,7 +192,6 @@ def get_owner_sub_menu(branch_name):
         KeyboardButton("📝 Pendaftaran Baru Anak-Anak")
     )
     markup.add(
-        KeyboardButton("💳 Status & Bayaran Yuran"),
         KeyboardButton("📊 Laporan")
     )
     markup.add(
@@ -456,34 +455,33 @@ def handle_keluarkan_senarai(message):
     )
 
 @bot.message_handler(
-    func=lambda message: message.text and "Status & Bayaran Yuran" in message.text
+    func=lambda message: message.text and "Laporan" in message.text
 )
-def handle_status_yuran(message):
+def handle_laporan(message):
     markup = InlineKeyboardMarkup()
     markup.add(
-        InlineKeyboardButton("🏠 Taska Corner", callback_data="fee_c"),
-        InlineKeyboardButton("🏠 Taska Hadhari", callback_data="fee_h")
+        InlineKeyboardButton("📅 Laporan Harian", callback_data="rep_daily"),
+        InlineKeyboardButton("💳 Laporan Pembayaran", callback_data="rep_payment")
     )
     bot.reply_to(
         message,
-        "💳 **Menu Status & Bayaran Yuran (Bulan: November 2026)**\n\nSila pilih cawangan taska:",
+        "📊 **Menu Laporan**\n\nSila pilih jenis laporan yang ingin dilihat:",
         parse_mode="Markdown",
         reply_markup=markup
     )
 
-@bot.message_handler(
-    func=lambda message: message.text and "Laporan" in message.text
-)
-def handle_laporan(message):
-    chat_id = message.chat.id
-    user_id = message.from_user.id
+
+# --- CALLBACK QUERY HANDLERS ---
+@bot.callback_query_handler(func=lambda call: call.data == "rep_daily")
+def callback_rep_daily(call):
+    chat_id = call.message.chat.id
     branch = user_branches.get(chat_id, "Taska Corner")
     today_str = datetime.now(MY_TZ).strftime("%Y-%m-%d")
     
     checked_in_kids = db_get_records(branch, "kid_checkin")
     clocked_staff = db_get_records(branch, "staff_clockin")
     
-    report_text = f"📊 **Laporan Semasa - [{branch}] ({today_str})**\n\n"
+    report_text = f"📊 **Laporan Harian - [{branch}] ({today_str})**\n\n"
     report_text += f"👶 **Anak Sedang Check-In:**\n"
     if checked_in_kids:
         for name, time_str in checked_in_kids.items():
@@ -498,13 +496,62 @@ def handle_laporan(message):
     else:
         report_text += "• Tiada\n"
 
-    reply_markup = get_appropriate_sub_menu(user_id, branch)
-    bot.reply_to(
-        message, report_text, parse_mode="HTML", reply_markup=reply_markup
+    bot.answer_callback_query(call.id, "Memaparkan Laporan Harian.")
+    bot.edit_message_text(
+        chat_id=chat_id,
+        message_id=call.message.message_id,
+        text=report_text,
+        parse_mode="HTML"
     )
 
+@bot.callback_query_handler(func=lambda call: call.data == "rep_payment")
+def callback_rep_payment(call):
+    text = f"💳 **Laporan Pembayaran Yuran**\n📅 **Bulan: November 2026**\n\n"
+    
+    for branch in ["Taska Corner", "Taska Hadhari"]:
+        text += f"🏠 **{branch}**\n"
+        kids_list = db_get_kids(branch)
+        if not kids_list:
+            text += "• Tiada rekod anak berdaftar.\n\n"
+        else:
+            for idx, name in enumerate(kids_list):
+                data = db_get_kid_fee(branch, name)
+                perlu = data["perlu"]
+                dibayar = data["dibayar"]
+                baki = perlu - dibayar
+                
+                if baki <= 0:
+                    status_icon = "🟢"
+                    status_str = "✅ Lunas"
+                else:
+                    status_icon = "🔴"
+                    status_str = "❌ Belum Lunas"
+                    
+                num_label = f"{idx + 1}. {name}"
+                text += (
+                    f"  {status_icon} **{num_label}**\n"
+                    f"  • Yuran Penuh: RM {perlu:.2f}\n"
+                    f"  • Telah Dibayar: RM {dibayar:.2f}\n"
+                    f"  • Baki: RM {baki:.2f}\n"
+                    f"  • Status: {status_str}\n"
+                )
+            text += "\n"
+            
+    markup = InlineKeyboardMarkup()
+    markup.add(
+        InlineKeyboardButton("💵 Kemaskini (Corner)", callback_data="fee_upd_c"),
+        InlineKeyboardButton("💵 Kemaskini (Hadhari)", callback_data="fee_upd_h")
+    )
+    
+    bot.answer_callback_query(call.id, "Memaparkan Laporan Pembayaran.")
+    bot.edit_message_text(
+        chat_id=call.message.chat.id,
+        message_id=call.message.message_id,
+        text=text,
+        parse_mode="Markdown",
+        reply_markup=markup
+    )
 
-# --- CALLBACK QUERY HANDLERS ---
 @bot.callback_query_handler(func=lambda call: call.data.startswith("cin_"))
 def callback_cin(call):
     parts = call.data[4:].rsplit("_", 1)
@@ -601,55 +648,6 @@ def callback_stf_cout(call):
 
 
 # --- CALLBACKS YURAN & PENDAFTARAN ---
-@bot.callback_query_handler(func=lambda call: call.data in ["fee_c", "fee_h"])
-def callback_fee_branch(call):
-    branch = "Taska Hadhari" if call.data == "fee_h" else "Taska Corner"
-    val = "h" if call.data == "fee_h" else "c"
-    
-    kids_list = db_get_kids(branch)
-    
-    text = f"💳 **Penyata Status Yuran - [{branch}]**\n📅 **Pembayaran Untuk Bulan: November 2026**\n\n"
-    
-    if not kids_list:
-        text += "• Tiada rekod anak berdaftar di cawangan ini.\n"
-    else:
-        for idx, name in enumerate(kids_list):
-            data = db_get_kid_fee(branch, name)
-            perlu = data["perlu"]
-            dibayar = data["dibayar"]
-            baki = perlu - dibayar
-            
-            if baki <= 0:
-                status_icon = "🟢"
-                status_str = "✅ *Lunas*"
-            else:
-                status_icon = "🔴"
-                status_str = "❌ *Belum Lunas*"
-                
-            num_label = f"{idx + 1}. {name}"
-            
-            text += (
-                f"{status_icon} **{num_label}**\n"
-                f"• Jumlah Yuran Penuh: RM {perlu:.2f}\n"
-                f"• Jumlah Telah Dibayar: RM {dibayar:.2f}\n"
-                f"• Baki Bayaran: RM {baki:.2f}\n"
-                f"• Status: {status_str}\n\n"
-            )
-            
-    markup = InlineKeyboardMarkup()
-    markup.add(
-        InlineKeyboardButton("💵 Kemaskini Bayaran Manual", callback_data=f"fee_upd_{val}")
-    )
-        
-    bot.answer_callback_query(call.id, "Memaparkan status yuran bulan November 2026.")
-    bot.edit_message_text(
-        chat_id=call.message.chat.id,
-        message_id=call.message.message_id,
-        text=text,
-        parse_mode="Markdown",
-        reply_markup=markup
-    )
-
 @bot.callback_query_handler(func=lambda call: call.data in ["fee_upd_c", "fee_upd_h"])
 def callback_fee_update(call):
     branch = "Taska Hadhari" if call.data == "fee_upd_h" else "Taska Corner"
