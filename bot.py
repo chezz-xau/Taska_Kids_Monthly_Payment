@@ -1,11 +1,21 @@
 import os
 import sqlite3
+import threading
 import telebot
 from telebot import types
+from flask import Flask
 
 # Mengambil token secara automatik dari Environment Variable Render
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 bot = telebot.TeleBot(TOKEN)
+
+# Setup Flask untuk mematuhi syarat Web Service Render (buka port)
+app = Flask(__name__)
+
+
+@app.route("/")
+def home():
+  return "Bot Taska sedang aktif dan berjalan!"
 
 
 # --- 1. SETUP DATABASE SQLITE ---
@@ -37,9 +47,6 @@ def init_db():
     )
     conn.commit()
   conn.close()
-
-
-init_db()
 
 
 # --- 2. COMMAND /START & MENU UTAMA ---
@@ -269,7 +276,19 @@ def menu_lain(call):
   )
 
 
-# Jalankan bot
-print("Bot sedang berjalan...")
-bot.remove_webhook()  # Membuang webhook lama bagi mengelakkan ralat 409 Conflict
-bot.infinity_polling()
+# --- 8. MAIN EXECUTION ---
+if __name__ == "__main__":
+  init_db()
+
+  # Jalankan Flask dalam background thread supaya port Render terbuka
+  def run_flask():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
+
+  flask_thread = threading.Thread(target=run_flask)
+  flask_thread.start()
+
+  # Jalankan Bot Telegram
+  print("Bot Telegram sedang berjalan...")
+  bot.remove_webhook()
+  bot.infinity_polling()
