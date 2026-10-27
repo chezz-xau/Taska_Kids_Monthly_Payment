@@ -72,20 +72,6 @@ def init_db():
         )
     ''')
     conn.commit()
-    
-    default_data = [
-        ("Taska Corner", "Ahmad", 300.0, 0.0),
-        ("Taska Corner", "Aisha", 300.0, 0.0),
-        ("Taska Hadhari", "Rayyan", 300.0, 0.0),
-    ]
-    for branch, kid, perlu, dibayar in default_data:
-        cur.execute('''
-            INSERT INTO kids_fees (branch, kid_name, perlu, dibayar)
-            VALUES (%s, %s, %s, %s)
-            ON CONFLICT (branch, kid_name) DO NOTHING
-        ''', (branch, kid, perlu, dibayar))
-    conn.commit()
-
     cur.close()
     conn.close()
 
@@ -709,8 +695,8 @@ def callback_reg_branch(call):
 
 @bot.callback_query_handler(func=lambda call: call.data in ["rem_c", "rem_h"])
 def callback_rem_branch(call):
-    branch = "Taska Hadhari" if call.data == "rem_h" else "Taska Corner"
-    val = "h" if call.data == "rem_h" else "c"
+    branch = "Taska Hadhari" if call.data == "reg_h" else "Taska Corner"
+    val = "h" if call.data == "reg_h" else "c"
     
     markup = InlineKeyboardMarkup()
     markup.add(
