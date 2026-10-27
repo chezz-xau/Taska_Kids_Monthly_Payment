@@ -1,167 +1,394 @@
 import os
-import sqlite3
+import psycopg2
 import telebot
 from telebot import types
 from flask import Flask, request
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
-bot = telebot.TeleBot(TOKEN)
+DATABASE_URL = os.environ.get("DATABASE_URL")
 
+bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-# --- 1. SETUP DATABASE SQLITE ---
+# Kamus sementara untuk menyimpan data pendaftaran mengikut chat_id
+user_temp_data = {}
+
+
+# Fungsi untuk sambung ke database Neon PostgreSQL
+def get_db_connection():
+  return psycopg2.connect(DATABASE_URL, sslmode="require")
+
+
+# --- 1. SETUP DATABASE POSTGRESQL ---
 def init_db():
-    conn = sqlite3.connect("taska.db")
-    cursor = conn.cursor()
-    cursor.execute('''
+  conn = get_db_connection()
+  cursor = conn.cursor()
+  cursor.execute("""
         CREATE TABLE IF NOT EXISTS pelajar (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             nama TEXT,
             cawangan TEXT,
             status_bayaran TEXT DEFAULT 'Belum Bayar'
         )
-    ''')
+    """)
+  conn.commit()
+
+  # Masukkan data contoh jika jadual kosong
+  cursor.execute("SELECT COUNT(*) FROM pelajar")
+  if cursor.fetchone()[0] == 0:
+    sample_data = [
+        ("Ali bin Abu", "Taska Corner", "Lunas"),
+        ("Siti binti Omar", "Taska Corner", "Belum Bayar"),
+        ("Ahmad bin Ali", "Taska Hadhari", "Lunas"),
+        ("Fatima binti Hassan", "Taska Hadhari", "Belum Bayar"),
+    ]
+    cursor.executemany(
+        "INSERT INTO pelajar (nama, cawangan, status_bayaran) VALUES (%s, %s,"
+        " %s)",
+        sample_data,
+    )
     conn.commit()
-    
-    # Masukkan data contoh (dummy data) jika database kosong
-    cursor.execute("SELECT COUNT(*) FROM pelajar")
-    if cursor.fetchone()[0] == 0:
-        sample_data = [
-            ("Ali bin Abu", "Taska Corner", "Lunas"),
-            ("Siti binti Omar", "Taska Corner", "Belum Bayar"),
-            ("Ahmad bin Ali", "Taska Hadhari", "Lunas"),
-            ("Fatima binti Hassan", "Taska Hadhari", "Belum Bayar")
-        ]
-        cursor.executemany("INSERT INTO pelajar (nama, cawangan, status_bayaran) VALUES (?, ?, ?)", sample_data)
-        conn.commit()
-    conn.close()
+  cursor.close()
+  conn.close()
+
 
 init_db()
+
 
 # --- 2. WEBHOOK ROUTE UNTUK TELEGRAM ---
 @app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
-    if request.headers.get("content-type") == "application/json":
-        json_string = request.get_data().decode("utf-8")
-        update = telebot.types.Update.de_json(json_string)
-        bot.process_new_updates([update])
-        return "", 200
-    else:
-        return "Unauthorized", 403
+  if request.headers.get("content-type") == "application/json":
+    json_string = request.get_data().decode("utf-8")
+    update = telebot.types.Update.de_json(json_string)
+    bot.process_new_updates([update])
+    return "", 200
+  else:
+    return "Unauthorized", 403
+
 
 @app.route("/")
 def index():
-    return "Bot Taska Webhook sedang aktif!"
+  return "Bot Taska Neon Database & Webhook sedang aktif!"
+
 
 # --- 3. COMMAND /START & MENU UTAMA ---
-@bot.message_handler(commands=['start'])
+@bot.message_handler(commands=["start"])
 def send_welcome(message):
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("📊 Laporan", callback_data="menu_laporan"))
-    markup.add(types.InlineKeyboardButton("⏰ Late Pick Up Charges", callback_data="late_pickup"))
-    markup.add(types.InlineKeyboardButton("📝 Pendaftaran Baru Anak-Anak", callback_data="pendaftaran"))
-    markup.add(types.InlineKeyboardButton("❌ Keluarkan Dari Senarai", callback_data="keluarkan"))
-    
-    bot.send_message(message.chat.id, "🤖 **Selamat Datang ke Taska Bot**\nSila pilih menu tindakan di bawah:", reply_markup=markup, parse_mode="Markdown")
+  markup = types.InlineKeyboardMarkup()
+  markup.add(types.InlineKeyboardButton("📊 Laporan", callback_data="menu_laporan"))
+  markup.add(
+      types.InlineKeyboardButton(
+          "⏰ Late Pick Up Charges", callback_data="late_pickup"
+      )
+  )
+  markup.add(
+      types.InlineKeyboardButton(
+          "📝 Pendaftaran Baru Anak-Anak", callback_data="pendaftaran"
+      )
+  )
+  markup.add(
+      types.InlineKeyboardButton(
+          "❌ Keluarkan Dari Senarai", callback_data="keluarkan"
+      )
+  )
 
-# --- 4. MENU LAPORAN ---
-@bot.callback_query_handler(func=lambda call: call.data == "menu_laporan" or call.data == "menu_utama")
-def menu_laporan(call):
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("📅 Laporan Harian", callback_data="laporan_harian"))
-    markup.add(types.InlineKeyboardButton("💳 Laporan Pembayaran", callback_data="menu_pembayaran"))
-    markup.add(types.InlineKeyboardButton("🔙 Menu Utama", callback_data="back_start"))
-    
-    try:
-        bot.edit_message_text("📊 **Menu Laporan**\nSila pilih jenis laporan yang ingin dilihat:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
-    except Exception:
-        bot.send_message(call.message.chat.id, "📊 **Menu Laporan**\nSila pilih jenis laporan yang ingin dilihat:", reply_markup=markup, parse_mode="Markdown")
+  bot.send_message(
+      message.chat.id,
+      "🤖 **Selamat Datang ke Taska Bot**\nSila pilih menu tindakan di bawah:",
+      reply_markup=markup,
+      parse_mode="Markdown",
+  )
+
 
 @bot.callback_query_handler(func=lambda call: call.data == "back_start")
 def back_to_start(call):
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("📊 Laporan", callback_data="menu_laporan"))
-    markup.add(types.InlineKeyboardButton("⏰ Late Pick Up Charges", callback_data="late_pickup"))
-    markup.add(types.InlineKeyboardButton("📝 Pendaftaran Baru Anak-Anak", callback_data="pendaftaran"))
-    markup.add(types.InlineKeyboardButton("❌ Keluarkan Dari Senarai", callback_data="keluarkan"))
-    
-    bot.edit_message_text("🤖 **Selamat Datang ke Taska Bot**\nSila pilih menu tindakan di bawah:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+  markup = types.InlineKeyboardMarkup()
+  markup.add(types.InlineKeyboardButton("📊 Laporan", callback_data="menu_laporan"))
+  markup.add(
+      types.InlineKeyboardButton(
+          "⏰ Late Pick Up Charges", callback_data="late_pickup"
+      )
+  )
+  markup.add(
+      types.InlineKeyboardButton(
+          "📝 Pendaftaran Baru Anak-Anak", callback_data="pendaftaran"
+      )
+  )
+  markup.add(
+      types.InlineKeyboardButton(
+          "❌ Keluarkan Dari Senarai", callback_data="keluarkan"
+      )
+  )
 
-# --- 5. PILIH CAWANGAN UNTUK LAPORAN PEMBAYARAN ---
+  bot.edit_message_text(
+      "🤖 **Selamat Datang ke Taska Bot**\nSila pilih menu tindakan di bawah:",
+      call.message.chat.id,
+      call.message.message_id,
+      reply_markup=markup,
+      parse_mode="Markdown",
+  )
+
+
+# --- 4. MENU LAPORAN ---
+@bot.callback_query_handler(func=lambda call: call.data == "menu_laporan")
+def menu_laporan(call):
+  markup = types.InlineKeyboardMarkup()
+  markup.add(
+      types.InlineKeyboardButton(
+          "📅 Laporan Harian", callback_data="laporan_harian"
+      )
+  )
+  markup.add(
+      types.InlineKeyboardButton(
+          "💳 Laporan Pembayaran", callback_data="menu_pembayaran"
+      )
+  )
+  markup.add(
+      types.InlineKeyboardButton("🔙 Menu Utama", callback_data="back_start")
+  )
+
+  bot.edit_message_text(
+      "📊 **Menu Laporan**\nSila pilih jenis laporan yang ingin dilihat:",
+      call.message.chat.id,
+      call.message.message_id,
+      reply_markup=markup,
+      parse_mode="Markdown",
+  )
+
+
+# --- 5. LAPORAN PEMBAYARAN: PILIH CAWANGAN ---
 @bot.callback_query_handler(func=lambda call: call.data == "menu_pembayaran")
 def menu_pembayaran(call):
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("🏡 Taska Corner", callback_data="cawangan_corner"))
-    markup.add(types.InlineKeyboardButton("🏫 Taska Hadhari", callback_data="cawangan_hadhari"))
-    markup.add(types.InlineKeyboardButton("🔙 Kembali", callback_data="menu_laporan"))
-    
-    bot.edit_message_text("🏢 **Sila pilih cawangan Taska untuk semakan yuran:**", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+  markup = types.InlineKeyboardMarkup()
+  markup.add(
+      types.InlineKeyboardButton(
+          "🏡 Taska Corner", callback_data="cawangan_corner"
+      )
+  )
+  markup.add(
+      types.InlineKeyboardButton(
+          "🏫 Taska Hadhari", callback_data="cawangan_hadhari"
+      )
+  )
+  markup.add(
+      types.InlineKeyboardButton("🔙 Kembali", callback_data="menu_laporan")
+  )
+
+  bot.edit_message_text(
+      "🏢 **Sila pilih cawangan Taska untuk semakan yuran:**",
+      call.message.chat.id,
+      call.message.message_id,
+      reply_markup=markup,
+      parse_mode="Markdown",
+  )
+
 
 # --- 6. PILIH STATUS BAYARAN MENGIKUT CAWANGAN ---
-@bot.callback_query_handler(func=lambda call: call.data in ["cawangan_corner", "cawangan_hadhari"])
+@bot.callback_query_handler(
+    func=lambda call: call.data in ["cawangan_corner", "cawangan_hadhari"]
+)
 def pilih_cawangan(call):
-    cawangan_key = "corner" if "corner" in call.data else "hadhari"
-    cawangan_name = "Taska Corner" if cawangan_key == "corner" else "Taska Hadhari"
-    
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("✅ Sudah Lunas", callback_data=f"status_lunas_{cawangan_key}"))
-    markup.add(types.InlineKeyboardButton("⏳ Belum Bayar", callback_data=f"status_belum_{cawangan_key}"))
-    markup.add(types.InlineKeyboardButton("🔙 Pilih Cawangan Lain", callback_data="menu_pembayaran"))
-    
-    bot.edit_message_text(f"📌 **{cawangan_name} - Status Yuran**\nSila pilih status bayaran:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+  cawangan_key = "corner" if "corner" in call.data else "hadhari"
+  cawangan_name = "Taska Corner" if cawangan_key == "corner" else "Taska Hadhari"
+
+  markup = types.InlineKeyboardMarkup()
+  markup.add(
+      types.InlineKeyboardButton(
+          "✅ Sudah Lunas", callback_data=f"status_lunas_{cawangan_key}"
+      )
+  )
+  markup.add(
+      types.InlineKeyboardButton(
+          "⏳ Belum Bayar", callback_data=f"status_belum_{cawangan_key}"
+      )
+  )
+  markup.add(
+      types.InlineKeyboardButton(
+          "🔙 Pilih Cawangan Lain", callback_data="menu_pembayaran"
+      )
+  )
+
+  bot.edit_message_text(
+      f"📌 **{cawangan_name} - Status Yuran**\nSila pilih status bayaran:",
+      call.message.chat.id,
+      call.message.message_id,
+      reply_markup=markup,
+      parse_mode="Markdown",
+  )
+
 
 # --- 7. PAPAR SENARAI MENGIKUT STATUS & CAWANGAN ---
 @bot.callback_query_handler(func=lambda call: call.data.startswith("status_"))
 def papar_senarai_status(call):
-    parts = call.data.split("_")
-    status_type = parts[1]
-    cawangan_key = parts[2]
-    
-    cawangan_name = "Taska Corner" if cawangan_key == "corner" else "Taska Hadhari"
-    status_text = "Sudah Lunas" if status_type == "lunas" else "Belum Bayar"
-    db_status = "Lunas" if status_type == "lunas" else "Belum Bayar"
-    
-    conn = sqlite3.connect("taska.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT nama FROM pelajar WHERE cawangan = ? AND status_bayaran = ?", (cawangan_name, db_status))
-    senarai = cursor.fetchall()
-    conn.close()
-    
-    text = f"📋 **Senarai Pelajar ({cawangan_name}) - {status_text}:**\n\n"
-    if senarai:
-        for idx, row in enumerate(senarai, 1):
-            text += f"{idx}. {row[0]}\n"
-    else:
-        text += "_Tiada rekod dijumpai._\n"
-        
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("🔙 Kembali", callback_data=f"cawangan_{cawangan_key}"))
-    
-    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+  parts = call.data.split("_")
+  status_type = parts[1]
+  cawangan_key = parts[2]
 
-# --- 8. PLACEHOLDER UNTUK MENU LAIN ---
-@bot.callback_query_handler(func=lambda call: call.data in ["laporan_harian", "late_pickup", "pendaftaran", "keluarkan"])
+  cawangan_name = "Taska Corner" if cawangan_key == "corner" else "Taska Hadhari"
+  status_text = "Sudah Lunas" if status_type == "lunas" else "Belum Bayar"
+  db_status = "Lunas" if status_type == "lunas" else "Belum Bayar"
+
+  conn = get_db_connection()
+  cursor = conn.cursor()
+  cursor.execute(
+      "SELECT nama FROM pelajar WHERE cawangan = %s AND status_bayaran = %s",
+      (cawangan_name, db_status),
+  )
+  senarai = cursor.fetchall()
+  cursor.close()
+  conn.close()
+
+  text = f"📋 **Senarai Pelajar ({cawangan_name}) - {status_text}:**\n\n"
+  if senarai:
+    for idx, row in enumerate(senarai, 1):
+      text += f"{idx}. {row[0]}\n"
+  else:
+    text += "_Tiada rekod dijumpai._\n"
+
+  markup = types.InlineKeyboardMarkup()
+  markup.add(
+      types.InlineKeyboardButton(
+          "🔙 Kembali", callback_data=f"cawangan_{cawangan_key}"
+      )
+  )
+
+  bot.edit_message_text(
+      text,
+      call.message.chat.id,
+      call.message.message_id,
+      reply_markup=markup,
+      parse_mode="Markdown",
+  )
+
+
+# --- 8. PENDAFTARAN BARU ANAK-ANAK ---
+@bot.callback_query_handler(func=lambda call: call.data == "pendaftaran")
+def pendaftaran_mulai(call):
+  bot.edit_message_text(
+      "📝 **Pendaftaran Baru Anak-Anak**\n\nSila hantar teks mengandungi"
+      " **nama penuh anak** yang ingin didaftarkan:",
+      call.message.chat.id,
+      call.message.message_id,
+      reply_markup=types.InlineKeyboardMarkup().add(
+          types.InlineKeyboardButton("🔙 Batal", callback_data="back_start")
+      ),
+      parse_mode="Markdown",
+  )
+  bot.register_next_step_handler(call.message, terima_nama_pendaftaran)
+
+
+def terima_nama_pendaftaran(message):
+  if message.text.startswith("/"):
+    return  # Jika pengguna hantar command, abaikan atau batal
+
+  nama_anak = message.text.strip()
+  user_temp_data[message.chat.id] = nama_anak
+
+  markup = types.InlineKeyboardMarkup()
+  markup.add(
+      types.InlineKeyboardButton(
+          "🏡 Taska Corner", callback_data="reg_cawangan_corner"
+      )
+  )
+  markup.add(
+      types.InlineKeyboardButton(
+          "🏫 Taska Hadhari", callback_data="reg_cawangan_hadhari"
+      )
+  )
+  markup.add(types.InlineKeyboardButton("❌ Batal", callback_data="back_start"))
+
+  bot.send_message(
+      message.chat.id,
+      f"👤 Nama Anak: **{nama_anak}**\n\nSila pilih cawangan untuk pendaftaran"
+      " ini:",
+      reply_markup=markup,
+      parse_mode="Markdown",
+  )
+
+
+@bot.callback_query_handler(
+    func=lambda call: call.data
+    in ["reg_cawangan_corner", "reg_cawangan_hadhari"]
+)
+def simpan_pendaftaran(call):
+  cawangan_name = (
+      "Taska Corner" if "corner" in call.data else "Taska Hadhari"
+  )
+  nama_anak = user_temp_data.get(call.message.chat.id)
+
+  if not nama_anak:
+    bot.answer_callback_query(
+        call.id, "Sesi tamat. Sila mula semula.", show_alert=True
+    )
+    return
+
+  # Simpan ke Database Neon PostgreSQL
+  conn = get_db_connection()
+  cursor = conn.cursor()
+  cursor.execute(
+      "INSERT INTO pelajar (nama, cawangan, status_bayaran) VALUES (%s, %s,"
+      " 'Belum Bayar')",
+      (nama_anak, cawangan_name),
+  )
+  conn.commit()
+  cursor.close()
+  conn.close()
+
+  # Padam data sementara
+  user_temp_data.pop(call.message.chat.id, None)
+
+  markup = types.InlineKeyboardMarkup()
+  markup.add(
+      types.InlineKeyboardButton("➕ Daftar Lagi", callback_data="pendaftaran")
+  )
+  markup.add(
+      types.InlineKeyboardButton("🔙 Menu Utama", callback_data="back_start")
+  )
+
+  bot.edit_message_text(
+      f"✅ **Berjaya Didaftarkan!**\n\nNama: *{nama_anak}*\nCawangan:"
+      f" *{cawangan_name}*\nStatus Yuran: *Belum Bayar*",
+      call.message.chat.id,
+      call.message.message_id,
+      reply_markup=markup,
+      parse_mode="Markdown",
+  )
+
+
+# --- 9. PLACEHOLDER UNTUK MENU LAIN ---
+@bot.callback_query_handler(
+    func=lambda call: call.data in ["laporan_harian", "late_pickup", "keluarkan"]
+)
 def menu_lain(call):
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("🔙 Menu Utama", callback_data="back_start"))
-    
-    feature_names = {
-        "laporan_harian": "Laporan Harian",
-        "late_pickup": "Late Pick Up Charges",
-        "pendaftaran": "Pendaftaran Baru Anak-Anak",
-        "keluarkan": "Keluarkan Dari Senarai"
-    }
-    title = feature_names.get(call.data, "Fungsi")
-    
-    bot.edit_message_text(f"🛠️ **{title}**\nBahagian ini sedang dalam pembangunan.", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+  markup = types.InlineKeyboardMarkup()
+  markup.add(
+      types.InlineKeyboardButton("🔙 Menu Utama", callback_data="back_start")
+  )
 
-# --- 9. MENJALANKAN APLIKASI WEBHOOK ---
+  feature_names = {
+      "laporan_harian": "Laporan Harian",
+      "late_pickup": "Late Pick Up Charges",
+      "keluarkan": "Keluarkan Dari Senarai",
+  }
+  title = feature_names.get(call.data, "Fungsi")
+
+  bot.edit_message_text(
+      f"🛠️ **{title}**\nBahagian ini sedang dalam pembangunan.",
+      call.message.chat.id,
+      call.message.message_id,
+      reply_markup=markup,
+      parse_mode="Markdown",
+  )
+
+
+# --- 10. MENJALANKAN APLIKASI WEBHOOK ---
 if __name__ == "__main__":
-    render_url = os.environ.get("RENDER_EXTERNAL_URL")
-    if render_url:
-        bot.remove_webhook()
-        bot.set_webhook(url=f"{render_url}/{TOKEN}")
-        print(f"Webhook berjaya dipasang ke: {render_url}/{TOKEN}")
-        
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+  render_url = os.environ.get("RENDER_EXTERNAL_URL")
+  if render_url:
+    bot.remove_webhook()
+    bot.set_webhook(url=f"{render_url}/{TOKEN}")
+    print(f"Webhook berjaya dipasang ke: {render_url}/{TOKEN}")
+
+  port = int(os.environ.get("PORT", 10000))
+  app.run(host="0.0.0.0", port=port)
