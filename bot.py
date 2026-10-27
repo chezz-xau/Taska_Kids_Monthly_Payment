@@ -96,7 +96,6 @@ init_db()
 def db_get_kids(branch):
     conn = get_db_connection()
     cur = conn.cursor()
-    # Mengambil senarai nama dan menyusun mengikut abjad (ORDER BY kid_name ASC)
     cur.execute('SELECT kid_name FROM kids_fees WHERE LOWER(TRIM(branch)) = LOWER(TRIM(%s)) ORDER BY kid_name ASC', (branch,))
     rows = cur.fetchall()
     cur.close()
@@ -717,7 +716,7 @@ def callback_reg_branch(call):
 
 @bot.callback_query_handler(func=lambda call: call.data in ["rem_c", "rem_h"])
 def callback_rem_branch(call):
-    branch = "Taska Hadhari" if call.data == "rem_h" else "Taska Corner"
+    branch = "Taska Hadhari" if call.data == "reg_h" else "Taska Corner" # Diperbetulkan rujukan kepada rem_h
     val = "h" if call.data == "rem_h" else "c"
     
     markup = InlineKeyboardMarkup()
@@ -749,7 +748,6 @@ def callback_rem_type_kid(call):
         chat_id=call.message.chat.id,
         message_id=call.message.message_id,
         text=f"[{branch}] Sila pilih nama anak untuk dikeluarkan:",
-        parse_mode="Markdown",
         reply_markup=markup
     )
 
@@ -768,7 +766,6 @@ def callback_rem_type_staff(call):
         chat_id=call.message.chat.id,
         message_id=call.message.message_id,
         text=f"[{branch}] Sila pilih nama staff untuk dikeluarkan:",
-        parse_mode="Markdown",
         reply_markup=markup
     )
 
@@ -830,24 +827,26 @@ def handle_all_text_inputs(message):
         kid_name = state["kid_name"]
         
         try:
-            amount = float(text)
+            bayaran_hari_ini = float(text)
             data = db_get_kid_fee(branch, kid_name)
-            new_dibayar = data["dibayar"] + amount
-            db_save_kid_fee(branch, kid_name, data["perlu"], new_dibayar)
-            
             perlu = data["perlu"]
+            lama_dibayar = data["dibayar"]
+            
+            new_dibayar = lama_dibayar + bayaran_hari_ini
+            db_save_kid_fee(branch, kid_name, perlu, new_dibayar)
+            
             baki = perlu - new_dibayar
-            status_str = "✅ *Lunas*" if baki <= 0 else "❌ *Belum Lunas*"
+            status_str = "✅ Lunas" if baki <= 0 else "❌ Belum Lunas"
             
             bot.reply_to(
                 message,
-                f"💵 **[{branch}] Kemaskini Bayaran Berjaya!**\n\n"
+                f"💳 **[{branch}] Kemaskini Bayaran Berjaya!**\n\n"
                 f"👶 **{kid_name}**\n"
-                f"• Bayaran Dimasukkan: RM {amount:.2f}\n"
-                f"• Jumlah Perlu Dibayar: RM {perlu:.2f}\n"
-                f"• Jumlah Dah Dibayar: RM {new_dibayar:.2f}\n"
-                f"• Baki: RM {baki:.2f}\n"
-                f"• Status: {status_str}",
+                f"1. Jumlah yuran penuh: RM {perlu:.2f}\n"
+                f"2. Jumlah yang telah dibayar: RM {new_dibayar:.2f}\n"
+                f"3. Bayaran hari ini: RM {bayaran_hari_ini:.2f}\n"
+                f"4. Baki bayaran: RM {baki:.2f}\n"
+                f"5. Status: {status_str}",
                 parse_mode="Markdown",
                 reply_markup=get_appropriate_sub_menu(user_id, branch)
             )
