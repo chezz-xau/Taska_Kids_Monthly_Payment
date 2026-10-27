@@ -76,7 +76,7 @@ def init_db():
     ''')
     conn.commit()
     
-    # Masukkan data permulaan jika jadual kosong untuk memastikan Taska Hadhari mempunyai rekod awal
+    # Masukkan data permulaan jika jadual kosong
     cur.execute('SELECT COUNT(*) FROM kids_fees')
     if cur.fetchone()[0] == 0:
         default_data = [
@@ -101,7 +101,6 @@ init_db()
 def db_get_kids(branch):
     conn = get_db_connection()
     cur = conn.cursor()
-    # Gunakan ILIKE atau TRIM untuk memastikan carian cawangan tepat tanpa isu huruf besar/kecil
     cur.execute('SELECT kid_name FROM kids_fees WHERE LOWER(TRIM(branch)) = LOWER(TRIM(%s))', (branch,))
     rows = cur.fetchall()
     cur.close()
@@ -597,7 +596,7 @@ def callback_clockout_staff(call):
 # --- CALLBACKS YURAN & PENDAFTARAN ---
 @bot.callback_query_handler(func=lambda call: call.data.startswith("fee_branch_"))
 def callback_fee_branch(call):
-    branch = call.data.replace("fee_branch_", "")
+    branch = call.data.replace("fee_branch_", "").strip()
     
     markup = InlineKeyboardMarkup()
     markup.add(
@@ -614,7 +613,7 @@ def callback_fee_branch(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("fee_check_"))
 def callback_fee_check(call):
-    branch = call.data.replace("fee_check_", "")
+    branch = call.data.replace("fee_check_", "").strip()
     kids_list = db_get_kids(branch)
     
     text = f"💳 **Penyata Status Yuran - [{branch}]**\n\n"
@@ -648,10 +647,14 @@ def callback_fee_check(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("fee_update_"))
 def callback_fee_update(call):
-    branch = call.data.replace("fee_update_", "")
+    branch = call.data.replace("fee_update_", "").strip()
     kids_list = db_get_kids(branch)
     
     markup = InlineKeyboardMarkup()
+    if not kids_list:
+        bot.answer_callback_query(call.id, "Tiada anak berdaftar di cawangan ini.")
+        return
+        
     for name in kids_list:
         markup.add(
             InlineKeyboardButton(f"💵 Bayar: {name}", callback_data=f"input_pay_{branch}_{name}")
@@ -668,11 +671,20 @@ def callback_fee_update(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("input_pay_"))
 def callback_input_pay(call):
-    parts = call.data.replace("input_pay_", "").split("_", 1)
-    branch = parts[0]
-    kid_name = parts[1]
+    data_str = call.data.replace("input_pay_", "")
+    # Asingkan branch dan kid_name dengan teliti (Taska Hadhari mempunyai ruang)
+    if data_str.startswith("Taska Hadhari_"):
+        branch = "Taska Hadhari"
+        kid_name = data_str.replace("Taska Hadhari_", "")
+    elif data_str.startswith("Taska Corner_"):
+        branch = "Taska Corner"
+        kid_name = data_str.replace("Taska Corner_", "")
+    else:
+        parts = data_str.split("_", 1)
+        branch = parts[0]
+        kid_name = parts[1] if len(parts) > 1 else ""
+
     chat_id = call.message.chat.id
-    
     user_states[chat_id] = {"action": "input_payment", "branch": branch, "kid_name": kid_name}
     
     bot.answer_callback_query(call.id, f"Sila taip jumlah bayaran untuk {kid_name}")
@@ -684,7 +696,7 @@ def callback_input_pay(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("reg_branch_"))
 def callback_reg_branch(call):
-    branch = call.data.replace("reg_branch_", "")
+    branch = call.data.replace("reg_branch_", "").strip()
     chat_id = call.message.chat.id
     
     user_states[chat_id] = {"action": "input_register_name", "branch": branch}
@@ -698,7 +710,7 @@ def callback_reg_branch(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("rem_branch_"))
 def callback_rem_branch(call):
-    branch = call.data.replace("rem_branch_", "")
+    branch = call.data.replace("rem_branch_", "").strip()
     
     markup = InlineKeyboardMarkup()
     markup.add(
@@ -715,7 +727,7 @@ def callback_rem_branch(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("rem_type_kid_"))
 def callback_rem_type_kid(call):
-    branch = call.data.replace("rem_type_kid_", "")
+    branch = call.data.replace("rem_type_kid_", "").strip()
     kids_list = db_get_kids(branch)
     
     markup = InlineKeyboardMarkup()
@@ -732,7 +744,7 @@ def callback_rem_type_kid(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("rem_type_staff_"))
 def callback_rem_type_staff(call):
-    branch = call.data.replace("rem_type_staff_", "")
+    branch = call.data.replace("rem_type_staff_", "").strip()
     staff_list = get_staff_list(branch)
     
     markup = InlineKeyboardMarkup()
@@ -749,9 +761,17 @@ def callback_rem_type_staff(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("remove_kid_"))
 def callback_remove_kid_action(call):
-    parts = call.data.replace("remove_kid_", "").split("_", 1)
-    branch = parts[0]
-    kid_name = parts[1]
+    data_str = call.data.replace("remove_kid_", "")
+    if data_str.startswith("Taska Hadhari_"):
+        branch = "Taska Hadhari"
+        kid_name = data_str.replace("Taska Hadhari_", "")
+    elif data_str.startswith("Taska Corner_"):
+        branch = "Taska Corner"
+        kid_name = data_str.replace("Taska Corner_", "")
+    else:
+        parts = data_str.split("_", 1)
+        branch = parts[0]
+        kid_name = parts[1] if len(parts) > 1 else ""
     
     db_remove_kid(branch, kid_name)
     
@@ -765,9 +785,17 @@ def callback_remove_kid_action(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("remove_staff_"))
 def callback_remove_staff_action(call):
-    parts = call.data.replace("remove_staff_", "").split("_", 1)
-    branch = parts[0]
-    staff_name = parts[1]
+    data_str = call.data.replace("remove_staff_", "")
+    if data_str.startswith("Taska Hadhari_"):
+        branch = "Taska Hadhari"
+        staff_name = data_str.replace("Taska Hadhari_", "")
+    elif data_str.startswith("Taska Corner_"):
+        branch = "Taska Corner"
+        staff_name = data_str.replace("Taska Corner_", "")
+    else:
+        parts = data_str.split("_", 1)
+        branch = parts[0]
+        staff_name = parts[1] if len(parts) > 1 else ""
     
     staff_list = get_staff_list(branch)
     if staff_name in staff_list:
