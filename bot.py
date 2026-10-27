@@ -27,7 +27,6 @@ app = Flask(__name__)
 MY_TZ = timezone(timedelta(hours=8))
 
 # Cawangan Taska & Senarai Staf
-BRANCHES_LIST = ["Taska Corner", "Taska Hadhari"]
 staff_corner_str = os.environ.get("STAFF_TASKA_CORNER", "Siti Maryam, Adam Harith")
 staff_hadhari_str = os.environ.get("STAFF_TASKA_HADHARI", "Siti Maryam, Adam Harith")
 
@@ -88,7 +87,7 @@ def init_db():
             cur.execute('''
                 INSERT INTO kids_fees (branch, kid_name, perlu, dibayar)
                 VALUES (%s, %s, %s, %s)
-                ON CONFLICT DO NOTHING
+                ON CONFLICT (branch, kid_name) DO NOTHING
             ''', (branch, kid, perlu, dibayar))
         conn.commit()
 
@@ -293,7 +292,7 @@ def handle_check_in_anak(message):
         else:
             markup.add(
                 InlineKeyboardButton(
-                    f"📥 {name} (Check-In)", callback_data=f"checkin_kid_{name}"
+                    f"📥 {name} (Check-In)", callback_data=f"checkin_kid_{branch}_{name}"
                 )
             )
 
@@ -316,7 +315,7 @@ def handle_check_out_anak(message):
             time_str = checked_in_today[name]
             markup.add(
                 InlineKeyboardButton(
-                    f"📤 {name} (Check-In jam {time_str})", callback_data=f"checkout_kid_{name}"
+                    f"📤 {name} (Check-In jam {time_str})", callback_data=f"checkout_kid_{branch}_{name}"
                 )
             )
         else:
@@ -384,7 +383,7 @@ def handle_clock_in_staff(message):
         else:
             markup.add(
                 InlineKeyboardButton(
-                    f"🔴 {name} (Belum Hadir)", callback_data=f"clockin_staff_{name}"
+                    f"🔴 {name} (Belum Hadir)", callback_data=f"clockin_staff_{branch}_{name}"
                 )
             )
 
@@ -407,7 +406,7 @@ def handle_clock_out_staff(message):
             time_str = clocked_in_today[name]
             markup.add(
                 InlineKeyboardButton(
-                    f"🔴 {name} (Clock-In: {time_str})", callback_data=f"clockout_staff_{name}"
+                    f"🔴 {name} (Clock-In: {time_str})", callback_data=f"clockout_staff_{branch}_{name}"
                 )
             )
         else:
@@ -505,11 +504,16 @@ def handle_laporan(message):
 # --- CALLBACK QUERY HANDLERS ---
 @bot.callback_query_handler(func=lambda call: call.data.startswith("checkin_kid_"))
 def callback_checkin_kid(call):
-    chat_id = call.message.chat.id
-    branch = user_branches.get(chat_id, "Taska Corner")
-    kid_name = call.data.replace("checkin_kid_", "")
+    data_str = call.data.replace("checkin_kid_", "")
+    if data_str.startswith("Taska Hadhari_"):
+        branch = "Taska Hadhari"
+        kid_name = data_str.replace("Taska Hadhari_", "")
+    else:
+        parts = data_str.split("_", 1)
+        branch = parts[0]
+        kid_name = parts[1] if len(parts) > 1 else ""
+
     now_time = datetime.now(MY_TZ).strftime("%I:%M %p")
-    
     db_save_record(branch, "kid_checkin", kid_name, now_time)
         
     bot.answer_callback_query(call.id, f"{kid_name} telah Check-In pada {now_time}!")
@@ -522,11 +526,16 @@ def callback_checkin_kid(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("checkout_kid_"))
 def callback_checkout_kid(call):
-    chat_id = call.message.chat.id
-    branch = user_branches.get(chat_id, "Taska Corner")
-    kid_name = call.data.replace("checkout_kid_", "")
+    data_str = call.data.replace("checkout_kid_", "")
+    if data_str.startswith("Taska Hadhari_"):
+        branch = "Taska Hadhari"
+        kid_name = data_str.replace("Taska Hadhari_", "")
+    else:
+        parts = data_str.split("_", 1)
+        branch = parts[0]
+        kid_name = parts[1] if len(parts) > 1 else ""
+
     now_time = datetime.now(MY_TZ).strftime("%I:%M %p")
-    
     checked_records = db_get_records(branch, "kid_checkin")
     checkin_time = checked_records.get(kid_name, "N/A")
     db_remove_record(branch, "kid_checkin", kid_name)
@@ -541,11 +550,16 @@ def callback_checkout_kid(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("manual_kid_"))
 def callback_manual_kid(call):
-    parts = call.data.replace("manual_kid_", "").split("_", 1)
-    branch = parts[0]
-    kid_name = parts[1]
+    data_str = call.data.replace("manual_kid_", "")
+    if data_str.startswith("Taska Hadhari_"):
+        branch = "Taska Hadhari"
+        kid_name = data_str.replace("Taska Hadhari_", "")
+    else:
+        parts = data_str.split("_", 1)
+        branch = parts[0]
+        kid_name = parts[1] if len(parts) > 1 else ""
+
     chat_id = call.message.chat.id
-    
     user_states[chat_id] = {"action": "input_manual_time", "branch": branch, "kid_name": kid_name}
     
     bot.answer_callback_query(call.id, f"Masukkan masa untuk {kid_name}")
@@ -558,11 +572,16 @@ def callback_manual_kid(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("clockin_staff_"))
 def callback_clockin_staff(call):
-    chat_id = call.message.chat.id
-    branch = user_branches.get(chat_id, "Taska Corner")
-    staff_name = call.data.replace("clockin_staff_", "")
+    data_str = call.data.replace("clockin_staff_", "")
+    if data_str.startswith("Taska Hadhari_"):
+        branch = "Taska Hadhari"
+        staff_name = data_str.replace("Taska Hadhari_", "")
+    else:
+        parts = data_str.split("_", 1)
+        branch = parts[0]
+        staff_name = parts[1] if len(parts) > 1 else ""
+
     now_time = datetime.now(MY_TZ).strftime("%I:%M %p")
-    
     db_save_record(branch, "staff_clockin", staff_name, now_time)
         
     bot.answer_callback_query(call.id, f"{staff_name} telah Clock-In pada {now_time}!")
@@ -575,11 +594,16 @@ def callback_clockin_staff(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("clockout_staff_"))
 def callback_clockout_staff(call):
-    chat_id = call.message.chat.id
-    branch = user_branches.get(chat_id, "Taska Corner")
-    staff_name = call.data.replace("clockout_staff_", "")
+    data_str = call.data.replace("clockout_staff_", "")
+    if data_str.startswith("Taska Hadhari_"):
+        branch = "Taska Hadhari"
+        staff_name = data_str.replace("Taska Hadhari_", "")
+    else:
+        parts = data_str.split("_", 1)
+        branch = parts[0]
+        staff_name = parts[1] if len(parts) > 1 else ""
+
     now_time = datetime.now(MY_TZ).strftime("%I:%M %p")
-    
     clocked_records = db_get_records(branch, "staff_clockin")
     clockin_time = clocked_records.get(staff_name, "N/A")
     db_remove_record(branch, "staff_clockin", staff_name)
@@ -672,13 +696,9 @@ def callback_fee_update(call):
 @bot.callback_query_handler(func=lambda call: call.data.startswith("input_pay_"))
 def callback_input_pay(call):
     data_str = call.data.replace("input_pay_", "")
-    # Asingkan branch dan kid_name dengan teliti (Taska Hadhari mempunyai ruang)
     if data_str.startswith("Taska Hadhari_"):
         branch = "Taska Hadhari"
         kid_name = data_str.replace("Taska Hadhari_", "")
-    elif data_str.startswith("Taska Corner_"):
-        branch = "Taska Corner"
-        kid_name = data_str.replace("Taska Corner_", "")
     else:
         parts = data_str.split("_", 1)
         branch = parts[0]
@@ -765,9 +785,6 @@ def callback_remove_kid_action(call):
     if data_str.startswith("Taska Hadhari_"):
         branch = "Taska Hadhari"
         kid_name = data_str.replace("Taska Hadhari_", "")
-    elif data_str.startswith("Taska Corner_"):
-        branch = "Taska Corner"
-        kid_name = data_str.replace("Taska Corner_", "")
     else:
         parts = data_str.split("_", 1)
         branch = parts[0]
@@ -789,9 +806,6 @@ def callback_remove_staff_action(call):
     if data_str.startswith("Taska Hadhari_"):
         branch = "Taska Hadhari"
         staff_name = data_str.replace("Taska Hadhari_", "")
-    elif data_str.startswith("Taska Corner_"):
-        branch = "Taska Corner"
-        staff_name = data_str.replace("Taska Corner_", "")
     else:
         parts = data_str.split("_", 1)
         branch = parts[0]
