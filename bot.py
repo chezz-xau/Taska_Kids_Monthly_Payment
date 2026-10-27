@@ -606,25 +606,9 @@ def callback_fee_branch(call):
     branch = "Taska Hadhari" if call.data == "fee_h" else "Taska Corner"
     val = "h" if call.data == "fee_h" else "c"
     
-    markup = InlineKeyboardMarkup()
-    markup.add(
-        InlineKeyboardButton("📋 Semak Status Yuran Anak", callback_data=f"fee_chk_{val}"),
-        InlineKeyboardButton("💵 Kemaskini Bayaran Manual", callback_data=f"fee_upd_{val}")
-    )
-    bot.edit_message_text(
-        chat_id=call.message.chat.id,
-        message_id=call.message.message_id,
-        text=f"💳 **[{branch}] Pengurusan Status & Bayaran Yuran**\n\nSila pilih tindakan di bawah:",
-        parse_mode="Markdown",
-        reply_markup=markup
-    )
-
-@bot.callback_query_handler(func=lambda call: call.data in ["fee_chk_c", "fee_chk_h"])
-def callback_fee_check(call):
-    branch = "Taska Hadhari" if call.data == "fee_chk_h" else "Taska Corner"
     kids_list = db_get_kids(branch)
     
-    text = f"💳 **Penyata Status Yuran - [{branch}]**\n\n"
+    text = f"💳 **Penyata Status Yuran - [{branch}]**\n📅 **Bulan: November 2026**\n\n"
     
     if not kids_list:
         text += "• Tiada rekod anak berdaftar di cawangan ini.\n"
@@ -635,23 +619,35 @@ def callback_fee_check(call):
             dibayar = data["dibayar"]
             baki = perlu - dibayar
             
-            status_str = "✅ *Lunas*" if baki <= 0 else "❌ *Belum Lunas*"
+            if baki <= 0:
+                status_icon = "🟢"
+                status_str = "✅ *Lunas*"
+            else:
+                status_icon = "🔴"
+                status_str = "❌ *Belum Lunas*"
+                
             num_label = f"{idx + 1}. {name}"
             
             text += (
-                f"👶 **{num_label}**\n"
-                f"• Jumlah Perlu Dibayar: RM {perlu:.2f}\n"
-                f"• Jumlah Dah Dibayar: RM {dibayar:.2f}\n"
-                f"• Baki: RM {baki:.2f}\n"
+                f"{status_icon} **{num_label}**\n"
+                f"• Jumlah Yuran Penuh: RM {perlu:.2f}\n"
+                f"• Jumlah Telah Dibayar: RM {dibayar:.2f}\n"
+                f"• Baki Bayaran: RM {baki:.2f}\n"
                 f"• Status: {status_str}\n\n"
             )
+            
+    markup = InlineKeyboardMarkup()
+    markup.add(
+        InlineKeyboardButton("💵 Kemaskini Bayaran Manual", callback_data=f"fee_upd_{val}")
+    )
         
-    bot.answer_callback_query(call.id, "Memaparkan ringkasan yuran.")
+    bot.answer_callback_query(call.id, "Memaparkan status yuran bulan November 2026.")
     bot.edit_message_text(
         chat_id=call.message.chat.id,
         message_id=call.message.message_id,
         text=text,
-        parse_mode="Markdown"
+        parse_mode="Markdown",
+        reply_markup=markup
     )
 
 @bot.callback_query_handler(func=lambda call: call.data in ["fee_upd_c", "fee_upd_h"])
@@ -840,7 +836,7 @@ def handle_all_text_inputs(message):
             
             bot.reply_to(
                 message,
-                f"💳 **[{branch}] Kemaskini Bayaran Berjaya!**\n\n"
+                f"💳 **[{branch}] Kemaskini Bayaran Berjaya! (Bulan: November 2026)**\n\n"
                 f"👶 **{kid_name}**\n"
                 f"1. Jumlah yuran penuh: RM {perlu:.2f}\n"
                 f"2. Jumlah yang telah dibayar: RM {new_dibayar:.2f}\n"
