@@ -7,7 +7,9 @@ from datetime import datetime
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 DATABASE_URL = os.environ.get("DATABASE_URL")
-ADMIN_ID = str(os.environ.get("ADMIN_ID", ""))  # Masukkan ID Telegram Admin di Render
+# Membaca senarai ADMIN_ID dan memisahkan mengikut koma
+admin_env = os.environ.get("ADMIN_ID", "")
+ADMIN_LIST = [aid.strip() for aid in admin_env.split(",") if aid.strip()]
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
@@ -74,10 +76,9 @@ def index():
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     user_id = str(message.from_user.id)
-    
     markup = types.InlineKeyboardMarkup()
     
-    if ADMIN_ID and user_id == ADMIN_ID:
+    if user_id in ADMIN_LIST:
         # MENU ADMIN
         markup.add(types.InlineKeyboardButton("📊 Laporan", callback_data="menu_laporan"))
         markup.add(types.InlineKeyboardButton("📝 Pendaftaran Baru Anak-Anak", callback_data="pendaftaran"))
@@ -98,7 +99,7 @@ def back_to_start(call):
     user_id = str(call.from_user.id)
     markup = types.InlineKeyboardMarkup()
     
-    if ADMIN_ID and user_id == ADMIN_ID:
+    if user_id in ADMIN_LIST:
         markup.add(types.InlineKeyboardButton("📊 Laporan", callback_data="menu_laporan"))
         markup.add(types.InlineKeyboardButton("📝 Pendaftaran Baru Anak-Anak", callback_data="pendaftaran"))
         markup.add(types.InlineKeyboardButton("❌ Keluarkan Dari Senarai", callback_data="keluarkan"))
