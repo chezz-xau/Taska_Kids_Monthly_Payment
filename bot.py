@@ -14,8 +14,8 @@ TOKEN = os.environ.get("TELEGRAM_TOKEN")
 if not TOKEN:
     raise ValueError("TELEGRAM_TOKEN tidak ditetapkan dalam environment variables!")
 
-# Ambil Telegram ID Owner dari environment variable Render
-OWNER_ID_STR = os.environ.get("OWNER_TELEGRAM_ID", "")
+# Mengambil ID Owner daripada key OWNER_IDS di Render
+OWNER_ID_STR = os.environ.get("OWNER_IDS", "")
 OWNER_IDS = [int(i.strip()) for i in OWNER_ID_STR.split(",") if i.strip().isdigit()]
 
 bot = telebot.TeleBot(TOKEN)
