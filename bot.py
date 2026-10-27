@@ -617,20 +617,25 @@ def callback_fee_check(call):
     kids_list = db_get_kids(branch)
     
     text = f"💳 **Penyata Status Yuran - [{branch}]**\n\n"
-    for name in kids_list:
-        data = db_get_kid_fee(branch, name)
-        perlu = data["perlu"]
-        dibayar = data["dibayar"]
-        baki = perlu - dibayar
-        status_str = "✅ *Lunas*" if baki <= 0 else "❌ *Belum Lunas*"
-        
-        text += (
-            f"👶 **{name}**\n"
-            f"• Jumlah Perlu Dibayar: RM {perlu:.2f}\n"
-            f"• Jumlah Dah Dibayar: RM {dibayar:.2f}\n"
-            f"• Baki: RM {baki:.2f}\n"
-            f"• Status: {status_str}\n\n"
-        )
+    
+    if not kids_list:
+        text += "• Tiada rekod anak berdaftar di cawangan ini.\n"
+    else:
+        for name in kids_list:
+            data = db_get_kid_fee(branch, name)
+            perlu = data["perlu"]
+            dibayar = data["dibayar"]
+            baki = perlu - dibayar
+            
+            status_str = "✅ *Lunas*" if baki <= 0 else "❌ *Belum Lunas*"
+            
+            text += (
+                f"👶 **{name}**\n"
+                f"• Jumlah Perlu Dibayar: RM {perlu:.2f}\n"
+                f"• Jumlah Dah Dibayar: RM {dibayar:.2f}\n"
+                f"• Baki: RM {baki:.2f}\n"
+                f"• Status: {status_str}\n\n"
+            )
         
     bot.answer_callback_query(call.id, "Memaparkan ringkasan yuran.")
     bot.edit_message_text(
