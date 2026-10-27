@@ -466,7 +466,7 @@ def handle_status_yuran(message):
     )
     bot.reply_to(
         message,
-        "💳 **Menu Status & Bayaran Yuran**\n\nSila pilih cawangan taska:",
+        "💳 **Menu Status & Bayaran Yuran (Bulan: November 2026)**\n\nSila pilih cawangan taska:",
         parse_mode="Markdown",
         reply_markup=markup
     )
@@ -608,7 +608,7 @@ def callback_fee_branch(call):
     
     kids_list = db_get_kids(branch)
     
-    text = f"💳 **Penyata Status Yuran - [{branch}]**\n📅 **Bulan: November 2026**\n\n"
+    text = f"💳 **Penyata Status Yuran - [{branch}]**\n📅 **Pembayaran Untuk Bulan: November 2026**\n\n"
     
     if not kids_list:
         text += "• Tiada rekod anak berdaftar di cawangan ini.\n"
@@ -836,7 +836,7 @@ def handle_all_text_inputs(message):
             
             bot.reply_to(
                 message,
-                f"💳 **[{branch}] Kemaskini Bayaran Berjaya! (Bulan: November 2026)**\n\n"
+                f"💳 **[{branch}] Kemaskini Bayaran Berjaya!**\n📅 **Pembayaran Untuk Bulan: November 2026**\n\n"
                 f"👶 **{kid_name}**\n"
                 f"1. Jumlah yuran penuh: RM {perlu:.2f}\n"
                 f"2. Jumlah yang telah dibayar: RM {new_dibayar:.2f}\n"
