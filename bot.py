@@ -73,7 +73,6 @@ def init_db():
     ''')
     conn.commit()
     
-    # Masukkan data permulaan jika jadual kosong
     default_data = [
         ("Taska Corner", "Ahmad", 300.0, 0.0),
         ("Taska Corner", "Aisha", 300.0, 0.0),
@@ -279,17 +278,18 @@ def handle_check_in_anak(message):
     markup = InlineKeyboardMarkup()
     for idx, name in enumerate(kids_list):
         num_label = f"{idx + 1}. {name}"
+        safe_name = name.replace(" ", "_")
         if name in checked_in_today:
             time_str = checked_in_today[name]
             markup.add(
                 InlineKeyboardButton(
-                    f"🔴 {num_label} (Sudah Check-In: {time_str})", callback_data=f"ignore_{name}"
+                    f"🔴 {num_label} (Sudah Check-In: {time_str})", callback_data=f"ignore_{safe_name}"
                 )
             )
         else:
             markup.add(
                 InlineKeyboardButton(
-                    f"📥 {num_label} (Check-In)", callback_data=f"cin_{branch}_{idx}"
+                    f"📥 {num_label} (Check-In)", callback_data=f"cin_{branch}_{safe_name}"
                 )
             )
 
@@ -309,17 +309,18 @@ def handle_check_out_anak(message):
     markup = InlineKeyboardMarkup()
     for idx, name in enumerate(kids_list):
         num_label = f"{idx + 1}. {name}"
+        safe_name = name.replace(" ", "_")
         if name in checked_in_today:
             time_str = checked_in_today[name]
             markup.add(
                 InlineKeyboardButton(
-                    f"📤 {num_label} (Check-In jam {time_str})", callback_data=f"cout_{branch}_{idx}"
+                    f"📤 {num_label} (Check-In jam {time_str})", callback_data=f"cout_{branch}_{safe_name}"
                 )
             )
         else:
             markup.add(
                 InlineKeyboardButton(
-                    f"⚪ {num_label} (Belum Check-In)", callback_data=f"ignore_uncheck_{name}"
+                    f"⚪ {num_label} (Belum Check-In)", callback_data=f"ignore_uncheck_{safe_name}"
                 )
             )
             
@@ -338,8 +339,9 @@ def handle_manual_attendance(message):
     markup = InlineKeyboardMarkup()
     for idx, name in enumerate(kids_list):
         num_label = f"{idx + 1}. {name}"
+        safe_name = name.replace(" ", "_")
         markup.add(
-            InlineKeyboardButton(f"✍️ Manual: {num_label}", callback_data=f"man_{branch}_{idx}")
+            InlineKeyboardButton(f"✍️ Manual: {num_label}", callback_data=f"man_{branch}_{safe_name}")
         )
         
     bot.reply_to(
@@ -372,17 +374,18 @@ def handle_clock_in_staff(message):
 
     markup = InlineKeyboardMarkup()
     for idx, name in enumerate(staff_list):
+        safe_name = name.replace(" ", "_")
         if name in clocked_in_today:
             time_str = clocked_in_today[name]
             markup.add(
                 InlineKeyboardButton(
-                    f"🟢 {name} (Sudah Hadir: {time_str})", callback_data=f"ignore_{name}"
+                    f"🟢 {name} (Sudah Hadir: {time_str})", callback_data=f"ignore_{safe_name}"
                 )
             )
         else:
             markup.add(
                 InlineKeyboardButton(
-                    f"🔴 {name} (Belum Hadir)", callback_data=f"stf_cin_{branch}_{idx}"
+                    f"🔴 {name} (Belum Hadir)", callback_data=f"stf_cin_{branch}_{safe_name}"
                 )
             )
 
@@ -401,17 +404,18 @@ def handle_clock_out_staff(message):
     
     markup = InlineKeyboardMarkup()
     for idx, name in enumerate(staff_list):
+        safe_name = name.replace(" ", "_")
         if name in clocked_in_today:
             time_str = clocked_in_today[name]
             markup.add(
                 InlineKeyboardButton(
-                    f"🔴 {name} (Clock-In: {time_str})", callback_data=f"stf_cout_{branch}_{idx}"
+                    f"🔴 {name} (Clock-In: {time_str})", callback_data=f"stf_cout_{branch}_{safe_name}"
                 )
             )
         else:
             markup.add(
                 InlineKeyboardButton(
-                    f"⚪ {name} (Belum Clock-In)", callback_data=f"ignore_uncheck_{name}"
+                    f"⚪ {name} (Belum Clock-In)", callback_data=f"ignore_uncheck_{safe_name}"
                 )
             )
 
@@ -505,9 +509,8 @@ def handle_laporan(message):
 def callback_cin(call):
     parts = call.data[4:].rsplit("_", 1)
     branch = parts[0].replace("_", " ")
-    idx = int(parts[1])
-    kids_list = db_get_kids(branch)
-    kid_name = kids_list[idx] if idx < len(kids_list) else "Unknown"
+    safe_name = parts[1]
+    kid_name = safe_name.replace("_", " ")
 
     now_time = datetime.now(MY_TZ).strftime("%I:%M %p")
     db_save_record(branch, "kid_checkin", kid_name, now_time)
@@ -524,9 +527,8 @@ def callback_cin(call):
 def callback_cout(call):
     parts = call.data[5:].rsplit("_", 1)
     branch = parts[0].replace("_", " ")
-    idx = int(parts[1])
-    kids_list = db_get_kids(branch)
-    kid_name = kids_list[idx] if idx < len(kids_list) else "Unknown"
+    safe_name = parts[1]
+    kid_name = safe_name.replace("_", " ")
 
     now_time = datetime.now(MY_TZ).strftime("%I:%M %p")
     checked_records = db_get_records(branch, "kid_checkin")
@@ -545,9 +547,8 @@ def callback_cout(call):
 def callback_man(call):
     parts = call.data[4:].rsplit("_", 1)
     branch = parts[0].replace("_", " ")
-    idx = int(parts[1])
-    kids_list = db_get_kids(branch)
-    kid_name = kids_list[idx] if idx < len(kids_list) else "Unknown"
+    safe_name = parts[1]
+    kid_name = safe_name.replace("_", " ")
 
     chat_id = call.message.chat.id
     user_states[chat_id] = {"action": "input_manual_time", "branch": branch, "kid_name": kid_name}
@@ -564,9 +565,8 @@ def callback_man(call):
 def callback_stf_cin(call):
     parts = call.data[8:].rsplit("_", 1)
     branch = parts[0].replace("_", " ")
-    idx = int(parts[1])
-    staff_list = get_staff_list(branch)
-    staff_name = staff_list[idx] if idx < len(staff_list) else "Unknown"
+    safe_name = parts[1]
+    staff_name = safe_name.replace("_", " ")
 
     now_time = datetime.now(MY_TZ).strftime("%I:%M %p")
     db_save_record(branch, "staff_clockin", staff_name, now_time)
@@ -583,9 +583,8 @@ def callback_stf_cin(call):
 def callback_stf_cout(call):
     parts = call.data[9:].rsplit("_", 1)
     branch = parts[0].replace("_", " ")
-    idx = int(parts[1])
-    staff_list = get_staff_list(branch)
-    staff_name = staff_list[idx] if idx < len(staff_list) else "Unknown"
+    safe_name = parts[1]
+    staff_name = safe_name.replace("_", " ")
 
     now_time = datetime.now(MY_TZ).strftime("%I:%M %p")
     clocked_records = db_get_records(branch, "staff_clockin")
@@ -668,8 +667,9 @@ def callback_fee_update(call):
         
     for idx, name in enumerate(kids_list):
         num_label = f"{idx + 1}. {name}"
+        safe_name = name.replace(" ", "_")
         markup.add(
-            InlineKeyboardButton(f"💵 Bayar: {num_label}", callback_data=f"pay_{val}_{idx}")
+            InlineKeyboardButton(f"💵 Bayar: {num_label}", callback_data=f"pay_{val}_{safe_name}")
         )
         
     bot.answer_callback_query(call.id, "Sila pilih nama anak.")
@@ -685,10 +685,9 @@ def callback_fee_update(call):
 def callback_input_pay(call):
     parts = call.data[4:].split("_", 1)
     val = parts[0]
-    idx = int(parts[1])
+    safe_name = parts[1]
+    kid_name = safe_name.replace("_", " ")
     branch = "Taska Hadhari" if val == "h" else "Taska Corner"
-    kids_list = db_get_kids(branch)
-    kid_name = kids_list[idx] if idx < len(kids_list) else "Unknown"
 
     chat_id = call.message.chat.id
     user_states[chat_id] = {"action": "input_payment", "branch": branch, "kid_name": kid_name}
@@ -716,7 +715,7 @@ def callback_reg_branch(call):
 
 @bot.callback_query_handler(func=lambda call: call.data in ["rem_c", "rem_h"])
 def callback_rem_branch(call):
-    branch = "Taska Hadhari" if call.data == "reg_h" else "Taska Corner" # Diperbetulkan rujukan kepada rem_h
+    branch = "Taska Hadhari" if call.data == "rem_h" else "Taska Corner"
     val = "h" if call.data == "rem_h" else "c"
     
     markup = InlineKeyboardMarkup()
@@ -741,8 +740,9 @@ def callback_rem_type_kid(call):
     markup = InlineKeyboardMarkup()
     for idx, name in enumerate(kids_list):
         num_label = f"{idx + 1}. {name}"
+        safe_name = name.replace(" ", "_")
         markup.add(
-            InlineKeyboardButton(f"❌ {num_label}", callback_data=f"del_kid_{val}_{idx}")
+            InlineKeyboardButton(f"❌ {num_label}", callback_data=f"del_kid_{val}_{safe_name}")
         )
     bot.edit_message_text(
         chat_id=call.message.chat.id,
@@ -759,8 +759,9 @@ def callback_rem_type_staff(call):
     
     markup = InlineKeyboardMarkup()
     for idx, name in enumerate(staff_list):
+        safe_name = name.replace(" ", "_")
         markup.add(
-            InlineKeyboardButton(f"❌ {name}", callback_data=f"del_stf_{val}_{idx}")
+            InlineKeyboardButton(f"❌ {name}", callback_data=f"del_stf_{val}_{safe_name}")
         )
     bot.edit_message_text(
         chat_id=call.message.chat.id,
@@ -773,10 +774,9 @@ def callback_rem_type_staff(call):
 def callback_remove_kid_action(call):
     parts = call.data[8:].split("_", 1)
     val = parts[0]
-    idx = int(parts[1])
+    safe_name = parts[1]
+    kid_name = safe_name.replace("_", " ")
     branch = "Taska Hadhari" if val == "h" else "Taska Corner"
-    kids_list = db_get_kids(branch)
-    kid_name = kids_list[idx] if idx < len(kids_list) else ""
     
     if kid_name:
         db_remove_kid(branch, kid_name)
@@ -793,11 +793,11 @@ def callback_remove_kid_action(call):
 def callback_remove_staff_action(call):
     parts = call.data[8:].split("_", 1)
     val = parts[0]
-    idx = int(parts[1])
+    safe_name = parts[1]
+    staff_name = safe_name.replace("_", " ")
     branch = "Taska Hadhari" if val == "h" else "Taska Corner"
-    staff_list = get_staff_list(branch)
-    staff_name = staff_list[idx] if idx < len(staff_list) else ""
     
+    staff_list = get_staff_list(branch)
     if staff_name in staff_list:
         staff_list.remove(staff_name)
         
