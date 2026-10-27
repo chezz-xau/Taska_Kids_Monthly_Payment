@@ -52,7 +52,6 @@ def init_db():
         return
     conn = get_db_connection()
     cur = conn.cursor()
-    # Jadual Kehadiran
     cur.execute('''
         CREATE TABLE IF NOT EXISTS attendance_records (
             branch TEXT,
@@ -63,7 +62,6 @@ def init_db():
             PRIMARY KEY (branch, category, name, record_date)
         )
     ''')
-    # Jadual Yuran & Maklumat Anak Mengikut Cawangan
     cur.execute('''
         CREATE TABLE IF NOT EXISTS kids_fees (
             branch TEXT,
@@ -75,7 +73,7 @@ def init_db():
     ''')
     conn.commit()
     
-    # Masukkan data permulaan jika jadual kosong atau pastikan Taska Hadhari wujud
+    # Masukkan data permulaan jika jadual kosong
     default_data = [
         ("Taska Corner", "Ahmad", 300.0, 0.0),
         ("Taska Corner", "Aisha", 300.0, 0.0),
@@ -98,7 +96,8 @@ init_db()
 def db_get_kids(branch):
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute('SELECT kid_name FROM kids_fees WHERE LOWER(TRIM(branch)) = LOWER(TRIM(%s))', (branch,))
+    # Mengambil senarai nama dan menyusun mengikut abjad (ORDER BY kid_name ASC)
+    cur.execute('SELECT kid_name FROM kids_fees WHERE LOWER(TRIM(branch)) = LOWER(TRIM(%s)) ORDER BY kid_name ASC', (branch,))
     rows = cur.fetchall()
     cur.close()
     conn.close()
@@ -279,18 +278,19 @@ def handle_check_in_anak(message):
     kids_list = db_get_kids(branch)
 
     markup = InlineKeyboardMarkup()
-    for name in kids_list:
+    for idx, name in enumerate(kids_list):
+        num_label = f"{idx + 1}. {name}"
         if name in checked_in_today:
             time_str = checked_in_today[name]
             markup.add(
                 InlineKeyboardButton(
-                    f"🔴 {name} (Sudah Check-In: {time_str})", callback_data=f"ignore_{name}"
+                    f"🔴 {num_label} (Sudah Check-In: {time_str})", callback_data=f"ignore_{name}"
                 )
             )
         else:
             markup.add(
                 InlineKeyboardButton(
-                    f"📥 {name} (Check-In)", callback_data=f"checkin_kid_{branch}_{name}"
+                    f"📥 {num_label} (Check-In)", callback_data=f"cin_{branch}_{idx}"
                 )
             )
 
@@ -308,18 +308,19 @@ def handle_check_out_anak(message):
     kids_list = db_get_kids(branch)
     
     markup = InlineKeyboardMarkup()
-    for name in kids_list:
+    for idx, name in enumerate(kids_list):
+        num_label = f"{idx + 1}. {name}"
         if name in checked_in_today:
             time_str = checked_in_today[name]
             markup.add(
                 InlineKeyboardButton(
-                    f"📤 {name} (Check-In jam {time_str})", callback_data=f"checkout_kid_{branch}_{name}"
+                    f"📤 {num_label} (Check-In jam {time_str})", callback_data=f"cout_{branch}_{idx}"
                 )
             )
         else:
             markup.add(
                 InlineKeyboardButton(
-                    f"⚪ {name} (Belum Check-In)", callback_data=f"ignore_uncheck_{name}"
+                    f"⚪ {num_label} (Belum Check-In)", callback_data=f"ignore_uncheck_{name}"
                 )
             )
             
@@ -336,9 +337,10 @@ def handle_manual_attendance(message):
     kids_list = db_get_kids(branch)
     
     markup = InlineKeyboardMarkup()
-    for name in kids_list:
+    for idx, name in enumerate(kids_list):
+        num_label = f"{idx + 1}. {name}"
         markup.add(
-            InlineKeyboardButton(f"✍️ Manual: {name}", callback_data=f"manual_kid_{branch}_{name}")
+            InlineKeyboardButton(f"✍️ Manual: {num_label}", callback_data=f"man_{branch}_{idx}")
         )
         
     bot.reply_to(
@@ -370,7 +372,7 @@ def handle_clock_in_staff(message):
     staff_list = get_staff_list(branch)
 
     markup = InlineKeyboardMarkup()
-    for name in staff_list:
+    for idx, name in enumerate(staff_list):
         if name in clocked_in_today:
             time_str = clocked_in_today[name]
             markup.add(
@@ -381,7 +383,7 @@ def handle_clock_in_staff(message):
         else:
             markup.add(
                 InlineKeyboardButton(
-                    f"🔴 {name} (Belum Hadir)", callback_data=f"clockin_staff_{branch}_{name}"
+                    f"🔴 {name} (Belum Hadir)", callback_data=f"stf_cin_{branch}_{idx}"
                 )
             )
 
@@ -399,12 +401,12 @@ def handle_clock_out_staff(message):
     staff_list = get_staff_list(branch)
     
     markup = InlineKeyboardMarkup()
-    for name in staff_list:
+    for idx, name in enumerate(staff_list):
         if name in clocked_in_today:
             time_str = clocked_in_today[name]
             markup.add(
                 InlineKeyboardButton(
-                    f"🔴 {name} (Clock-In: {time_str})", callback_data=f"clockout_staff_{branch}_{name}"
+                    f"🔴 {name} (Clock-In: {time_str})", callback_data=f"stf_cout_{branch}_{idx}"
                 )
             )
         else:
@@ -424,8 +426,8 @@ def handle_clock_out_staff(message):
 def handle_pendaftaran_baru(message):
     markup = InlineKeyboardMarkup()
     markup.add(
-        InlineKeyboardButton("🏠 Taska Corner", callback_data="reg_branch_Taska_Corner"),
-        InlineKeyboardButton("🏠 Taska Hadhari", callback_data="reg_branch_Taska_Hadhari")
+        InlineKeyboardButton("🏠 Taska Corner", callback_data="reg_c"),
+        InlineKeyboardButton("🏠 Taska Hadhari", callback_data="reg_h")
     )
     bot.reply_to(
         message,
@@ -440,8 +442,8 @@ def handle_pendaftaran_baru(message):
 def handle_keluarkan_senarai(message):
     markup = InlineKeyboardMarkup()
     markup.add(
-        InlineKeyboardButton("🏠 Taska Corner", callback_data="rem_branch_Taska_Corner"),
-        InlineKeyboardButton("🏠 Taska Hadhari", callback_data="rem_branch_Taska_Hadhari")
+        InlineKeyboardButton("🏠 Taska Corner", callback_data="rem_c"),
+        InlineKeyboardButton("🏠 Taska Hadhari", callback_data="rem_h")
     )
     bot.reply_to(
         message,
@@ -456,8 +458,8 @@ def handle_keluarkan_senarai(message):
 def handle_status_yuran(message):
     markup = InlineKeyboardMarkup()
     markup.add(
-        InlineKeyboardButton("🏠 Taska Corner", callback_data="fee_branch_Taska_Corner"),
-        InlineKeyboardButton("🏠 Taska Hadhari", callback_data="fee_branch_Taska_Hadhari")
+        InlineKeyboardButton("🏠 Taska Corner", callback_data="fee_c"),
+        InlineKeyboardButton("🏠 Taska Hadhari", callback_data="fee_h")
     )
     bot.reply_to(
         message,
@@ -500,19 +502,13 @@ def handle_laporan(message):
 
 
 # --- CALLBACK QUERY HANDLERS ---
-@bot.callback_query_handler(func=lambda call: call.data.startswith("checkin_kid_"))
-def callback_checkin_kid(call):
-    data_str = call.data.replace("checkin_kid_", "")
-    if data_str.startswith("Taska_Hadhari_"):
-        branch = "Taska Hadhari"
-        kid_name = data_str.replace("Taska_Hadhari_", "")
-    elif data_str.startswith("Taska_Corner_"):
-        branch = "Taska Corner"
-        kid_name = data_str.replace("Taska_Corner_", "")
-    else:
-        parts = data_str.split("_", 1)
-        branch = parts[0]
-        kid_name = parts[1] if len(parts) > 1 else ""
+@bot.callback_query_handler(func=lambda call: call.data.startswith("cin_"))
+def callback_cin(call):
+    parts = call.data[4:].rsplit("_", 1)
+    branch = parts[0].replace("_", " ")
+    idx = int(parts[1])
+    kids_list = db_get_kids(branch)
+    kid_name = kids_list[idx] if idx < len(kids_list) else "Unknown"
 
     now_time = datetime.now(MY_TZ).strftime("%I:%M %p")
     db_save_record(branch, "kid_checkin", kid_name, now_time)
@@ -525,19 +521,13 @@ def callback_checkin_kid(call):
         parse_mode="Markdown"
     )
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("checkout_kid_"))
-def callback_checkout_kid(call):
-    data_str = call.data.replace("checkout_kid_", "")
-    if data_str.startswith("Taska_Hadhari_"):
-        branch = "Taska Hadhari"
-        kid_name = data_str.replace("Taska_Hadhari_", "")
-    elif data_str.startswith("Taska_Corner_"):
-        branch = "Taska Corner"
-        kid_name = data_str.replace("Taska_Corner_", "")
-    else:
-        parts = data_str.split("_", 1)
-        branch = parts[0]
-        kid_name = parts[1] if len(parts) > 1 else ""
+@bot.callback_query_handler(func=lambda call: call.data.startswith("cout_"))
+def callback_cout(call):
+    parts = call.data[5:].rsplit("_", 1)
+    branch = parts[0].replace("_", " ")
+    idx = int(parts[1])
+    kids_list = db_get_kids(branch)
+    kid_name = kids_list[idx] if idx < len(kids_list) else "Unknown"
 
     now_time = datetime.now(MY_TZ).strftime("%I:%M %p")
     checked_records = db_get_records(branch, "kid_checkin")
@@ -552,19 +542,13 @@ def callback_checkout_kid(call):
         parse_mode="Markdown"
     )
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("manual_kid_"))
-def callback_manual_kid(call):
-    data_str = call.data.replace("manual_kid_", "")
-    if data_str.startswith("Taska_Hadhari_"):
-        branch = "Taska Hadhari"
-        kid_name = data_str.replace("Taska_Hadhari_", "")
-    elif data_str.startswith("Taska_Corner_"):
-        branch = "Taska Corner"
-        kid_name = data_str.replace("Taska_Corner_", "")
-    else:
-        parts = data_str.split("_", 1)
-        branch = parts[0]
-        kid_name = parts[1] if len(parts) > 1 else ""
+@bot.callback_query_handler(func=lambda call: call.data.startswith("man_"))
+def callback_man(call):
+    parts = call.data[4:].rsplit("_", 1)
+    branch = parts[0].replace("_", " ")
+    idx = int(parts[1])
+    kids_list = db_get_kids(branch)
+    kid_name = kids_list[idx] if idx < len(kids_list) else "Unknown"
 
     chat_id = call.message.chat.id
     user_states[chat_id] = {"action": "input_manual_time", "branch": branch, "kid_name": kid_name}
@@ -577,19 +561,13 @@ def callback_manual_kid(call):
         parse_mode="Markdown"
     )
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("clockin_staff_"))
-def callback_clockin_staff(call):
-    data_str = call.data.replace("clockin_staff_", "")
-    if data_str.startswith("Taska_Hadhari_"):
-        branch = "Taska Hadhari"
-        staff_name = data_str.replace("Taska_Hadhari_", "")
-    elif data_str.startswith("Taska_Corner_"):
-        branch = "Taska Corner"
-        staff_name = data_str.replace("Taska_Corner_", "")
-    else:
-        parts = data_str.split("_", 1)
-        branch = parts[0]
-        staff_name = parts[1] if len(parts) > 1 else ""
+@bot.callback_query_handler(func=lambda call: call.data.startswith("stf_cin_"))
+def callback_stf_cin(call):
+    parts = call.data[8:].rsplit("_", 1)
+    branch = parts[0].replace("_", " ")
+    idx = int(parts[1])
+    staff_list = get_staff_list(branch)
+    staff_name = staff_list[idx] if idx < len(staff_list) else "Unknown"
 
     now_time = datetime.now(MY_TZ).strftime("%I:%M %p")
     db_save_record(branch, "staff_clockin", staff_name, now_time)
@@ -602,19 +580,13 @@ def callback_clockin_staff(call):
         parse_mode="Markdown"
     )
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("clockout_staff_"))
-def callback_clockout_staff(call):
-    data_str = call.data.replace("clockout_staff_", "")
-    if data_str.startswith("Taska_Hadhari_"):
-        branch = "Taska Hadhari"
-        staff_name = data_str.replace("Taska_Hadhari_", "")
-    elif data_str.startswith("Taska_Corner_"):
-        branch = "Taska Corner"
-        staff_name = data_str.replace("Taska_Corner_", "")
-    else:
-        parts = data_str.split("_", 1)
-        branch = parts[0]
-        staff_name = parts[1] if len(parts) > 1 else ""
+@bot.callback_query_handler(func=lambda call: call.data.startswith("stf_cout_"))
+def callback_stf_cout(call):
+    parts = call.data[9:].rsplit("_", 1)
+    branch = parts[0].replace("_", " ")
+    idx = int(parts[1])
+    staff_list = get_staff_list(branch)
+    staff_name = staff_list[idx] if idx < len(staff_list) else "Unknown"
 
     now_time = datetime.now(MY_TZ).strftime("%I:%M %p")
     clocked_records = db_get_records(branch, "staff_clockin")
@@ -631,15 +603,15 @@ def callback_clockout_staff(call):
 
 
 # --- CALLBACKS YURAN & PENDAFTARAN ---
-@bot.callback_query_handler(func=lambda call: call.data.startswith("fee_branch_"))
+@bot.callback_query_handler(func=lambda call: call.data in ["fee_c", "fee_h"])
 def callback_fee_branch(call):
-    val = call.data.replace("fee_branch_", "").strip()
-    branch = "Taska Hadhari" if val == "Taska_Hadhari" else "Taska Corner"
+    branch = "Taska Hadhari" if call.data == "fee_h" else "Taska Corner"
+    val = "h" if call.data == "fee_h" else "c"
     
     markup = InlineKeyboardMarkup()
     markup.add(
-        InlineKeyboardButton("📋 Semak Status Yuran Anak", callback_data=f"fee_check_{val}"),
-        InlineKeyboardButton("💵 Kemaskini Bayaran Manual", callback_data=f"fee_update_{val}")
+        InlineKeyboardButton("📋 Semak Status Yuran Anak", callback_data=f"fee_chk_{val}"),
+        InlineKeyboardButton("💵 Kemaskini Bayaran Manual", callback_data=f"fee_upd_{val}")
     )
     bot.edit_message_text(
         chat_id=call.message.chat.id,
@@ -649,10 +621,9 @@ def callback_fee_branch(call):
         reply_markup=markup
     )
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("fee_check_"))
+@bot.callback_query_handler(func=lambda call: call.data in ["fee_chk_c", "fee_chk_h"])
 def callback_fee_check(call):
-    val = call.data.replace("fee_check_", "").strip()
-    branch = "Taska Hadhari" if val == "Taska_Hadhari" else "Taska Corner"
+    branch = "Taska Hadhari" if call.data == "fee_chk_h" else "Taska Corner"
     kids_list = db_get_kids(branch)
     
     text = f"💳 **Penyata Status Yuran - [{branch}]**\n\n"
@@ -660,16 +631,17 @@ def callback_fee_check(call):
     if not kids_list:
         text += "• Tiada rekod anak berdaftar di cawangan ini.\n"
     else:
-        for name in kids_list:
+        for idx, name in enumerate(kids_list):
             data = db_get_kid_fee(branch, name)
             perlu = data["perlu"]
             dibayar = data["dibayar"]
             baki = perlu - dibayar
             
             status_str = "✅ *Lunas*" if baki <= 0 else "❌ *Belum Lunas*"
+            num_label = f"{idx + 1}. {name}"
             
             text += (
-                f"👶 **{name}**\n"
+                f"👶 **{num_label}**\n"
                 f"• Jumlah Perlu Dibayar: RM {perlu:.2f}\n"
                 f"• Jumlah Dah Dibayar: RM {dibayar:.2f}\n"
                 f"• Baki: RM {baki:.2f}\n"
@@ -684,10 +656,10 @@ def callback_fee_check(call):
         parse_mode="Markdown"
     )
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("fee_update_"))
+@bot.callback_query_handler(func=lambda call: call.data in ["fee_upd_c", "fee_upd_h"])
 def callback_fee_update(call):
-    val = call.data.replace("fee_update_", "").strip()
-    branch = "Taska Hadhari" if val == "Taska_Hadhari" else "Taska Corner"
+    branch = "Taska Hadhari" if call.data == "fee_upd_h" else "Taska Corner"
+    val = "h" if call.data == "fee_upd_h" else "c"
     kids_list = db_get_kids(branch)
     
     markup = InlineKeyboardMarkup()
@@ -695,9 +667,10 @@ def callback_fee_update(call):
         bot.answer_callback_query(call.id, "Tiada anak berdaftar di cawangan ini.")
         return
         
-    for name in kids_list:
+    for idx, name in enumerate(kids_list):
+        num_label = f"{idx + 1}. {name}"
         markup.add(
-            InlineKeyboardButton(f"💵 Bayar: {name}", callback_data=f"input_pay_{val}_{name}")
+            InlineKeyboardButton(f"💵 Bayar: {num_label}", callback_data=f"pay_{val}_{idx}")
         )
         
     bot.answer_callback_query(call.id, "Sila pilih nama anak.")
@@ -709,19 +682,14 @@ def callback_fee_update(call):
         reply_markup=markup
     )
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("input_pay_"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("pay_"))
 def callback_input_pay(call):
-    data_str = call.data.replace("input_pay_", "")
-    if data_str.startswith("Taska_Hadhari_"):
-        branch = "Taska Hadhari"
-        kid_name = data_str.replace("Taska_Hadhari_", "")
-    elif data_str.startswith("Taska_Corner_"):
-        branch = "Taska Corner"
-        kid_name = data_str.replace("Taska_Corner_", "")
-    else:
-        parts = data_str.split("_", 1)
-        branch = parts[0]
-        kid_name = parts[1] if len(parts) > 1 else ""
+    parts = call.data[4:].split("_", 1)
+    val = parts[0]
+    idx = int(parts[1])
+    branch = "Taska Hadhari" if val == "h" else "Taska Corner"
+    kids_list = db_get_kids(branch)
+    kid_name = kids_list[idx] if idx < len(kids_list) else "Unknown"
 
     chat_id = call.message.chat.id
     user_states[chat_id] = {"action": "input_payment", "branch": branch, "kid_name": kid_name}
@@ -733,10 +701,9 @@ def callback_input_pay(call):
         parse_mode="Markdown"
     )
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("reg_branch_"))
+@bot.callback_query_handler(func=lambda call: call.data in ["reg_c", "reg_h"])
 def callback_reg_branch(call):
-    val = call.data.replace("reg_branch_", "").strip()
-    branch = "Taska Hadhari" if val == "Taska_Hadhari" else "Taska Corner"
+    branch = "Taska Hadhari" if call.data == "reg_h" else "Taska Corner"
     chat_id = call.message.chat.id
     
     user_states[chat_id] = {"action": "input_register_name", "branch": branch}
@@ -748,15 +715,15 @@ def callback_reg_branch(call):
         parse_mode="Markdown"
     )
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("rem_branch_"))
+@bot.callback_query_handler(func=lambda call: call.data in ["rem_c", "rem_h"])
 def callback_rem_branch(call):
-    val = call.data.replace("rem_branch_", "").strip()
-    branch = "Taska Hadhari" if val == "Taska_Hadhari" else "Taska Corner"
+    branch = "Taska Hadhari" if call.data == "rem_h" else "Taska Corner"
+    val = "h" if call.data == "rem_h" else "c"
     
     markup = InlineKeyboardMarkup()
     markup.add(
-        InlineKeyboardButton("👶 Keluarkan Nama Anak", callback_data=f"rem_type_kid_{val}"),
-        InlineKeyboardButton("👤 Keluarkan Nama Staff", callback_data=f"rem_type_staff_{val}")
+        InlineKeyboardButton("👶 Keluarkan Nama Anak", callback_data=f"rem_kid_{val}"),
+        InlineKeyboardButton("👤 Keluarkan Nama Staff", callback_data=f"rem_stf_{val}")
     )
     bot.edit_message_text(
         chat_id=call.message.chat.id,
@@ -766,57 +733,56 @@ def callback_rem_branch(call):
         reply_markup=markup
     )
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("rem_type_kid_"))
+@bot.callback_query_handler(func=lambda call: call.data in ["rem_kid_c", "rem_kid_h"])
 def callback_rem_type_kid(call):
-    val = call.data.replace("rem_type_kid_", "").strip()
-    branch = "Taska Hadhari" if val == "Taska_Hadhari" else "Taska Corner"
+    branch = "Taska Hadhari" if call.data.endswith("_h") else "Taska Corner"
+    val = "h" if call.data.endswith("_h") else "c"
     kids_list = db_get_kids(branch)
     
     markup = InlineKeyboardMarkup()
-    for name in kids_list:
+    for idx, name in enumerate(kids_list):
+        num_label = f"{idx + 1}. {name}"
         markup.add(
-            InlineKeyboardButton(f"❌ {name}", callback_data=f"remove_kid_{val}_{name}")
+            InlineKeyboardButton(f"❌ {num_label}", callback_data=f"del_kid_{val}_{idx}")
         )
     bot.edit_message_text(
         chat_id=call.message.chat.id,
         message_id=call.message.message_id,
         text=f"[{branch}] Sila pilih nama anak untuk dikeluarkan:",
+        parse_mode="Markdown",
         reply_markup=markup
     )
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("rem_type_staff_"))
+@bot.callback_query_handler(func=lambda call: call.data in ["rem_stf_c", "rem_stf_h"])
 def callback_rem_type_staff(call):
-    val = call.data.replace("rem_type_staff_", "").strip()
-    branch = "Taska Hadhari" if val == "Taska_Hadhari" else "Taska Corner"
+    branch = "Taska Hadhari" if call.data.endswith("_h") else "Taska Corner"
+    val = "h" if call.data.endswith("_h") else "c"
     staff_list = get_staff_list(branch)
     
     markup = InlineKeyboardMarkup()
-    for name in staff_list:
+    for idx, name in enumerate(staff_list):
         markup.add(
-            InlineKeyboardButton(f"❌ {name}", callback_data=f"remove_staff_{val}_{name}")
+            InlineKeyboardButton(f"❌ {name}", callback_data=f"del_stf_{val}_{idx}")
         )
     bot.edit_message_text(
         chat_id=call.message.chat.id,
         message_id=call.message.message_id,
         text=f"[{branch}] Sila pilih nama staff untuk dikeluarkan:",
+        parse_mode="Markdown",
         reply_markup=markup
     )
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("remove_kid_"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("del_kid_"))
 def callback_remove_kid_action(call):
-    data_str = call.data.replace("remove_kid_", "")
-    if data_str.startswith("Taska_Hadhari_"):
-        branch = "Taska Hadhari"
-        kid_name = data_str.replace("Taska_Hadhari_", "")
-    elif data_str.startswith("Taska_Corner_"):
-        branch = "Taska Corner"
-        kid_name = data_str.replace("Taska_Corner_", "")
-    else:
-        parts = data_str.split("_", 1)
-        branch = parts[0]
-        kid_name = parts[1] if len(parts) > 1 else ""
+    parts = call.data[8:].split("_", 1)
+    val = parts[0]
+    idx = int(parts[1])
+    branch = "Taska Hadhari" if val == "h" else "Taska Corner"
+    kids_list = db_get_kids(branch)
+    kid_name = kids_list[idx] if idx < len(kids_list) else ""
     
-    db_remove_kid(branch, kid_name)
+    if kid_name:
+        db_remove_kid(branch, kid_name)
     
     bot.answer_callback_query(call.id, f"{kid_name} telah dikeluarkan!")
     bot.edit_message_text(
@@ -826,21 +792,15 @@ def callback_remove_kid_action(call):
         parse_mode="Markdown"
     )
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("remove_staff_"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("del_stf_"))
 def callback_remove_staff_action(call):
-    data_str = call.data.replace("remove_staff_", "")
-    if data_str.startswith("Taska_Hadhari_"):
-        branch = "Taska Hadhari"
-        staff_name = data_str.replace("Taska_Hadhari_", "")
-    elif data_str.startswith("Taska_Corner_"):
-        branch = "Taska Corner"
-        staff_name = data_str.replace("Taska_Corner_", "")
-    else:
-        parts = data_str.split("_", 1)
-        branch = parts[0]
-        staff_name = parts[1] if len(parts) > 1 else ""
-    
+    parts = call.data[8:].split("_", 1)
+    val = parts[0]
+    idx = int(parts[1])
+    branch = "Taska Hadhari" if val == "h" else "Taska Corner"
     staff_list = get_staff_list(branch)
+    staff_name = staff_list[idx] if idx < len(staff_list) else ""
+    
     if staff_name in staff_list:
         staff_list.remove(staff_name)
         
