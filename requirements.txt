@@ -1,12 +1,8 @@
-python-telegram-bot
+pyTelegramBotAPI
 flask
+requests
 pandas
-openpyxl
-python-dotenv
-gunicorn
-pytz
-apscheduler
-psycopg2-binary
+
 
 
 
