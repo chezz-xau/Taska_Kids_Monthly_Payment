@@ -1,9 +1,10 @@
+import os
 import sqlite3
 import telebot
 from telebot import types
 
-# Gantikan "TOKEN_BOT_ANDA_DI_SINI" dengan token sebenar bot Telegram anda
-TOKEN = "8675996323:AAED9mwgb2VDGc7gitPAdEbhBbIq1hNCa8A"
+# Mengambil token secara automatik dari Environment Variable Render
+TOKEN = os.environ.get("TELEGRAM_TOKEN")
 bot = telebot.TeleBot(TOKEN)
 
 
@@ -21,7 +22,7 @@ def init_db():
     """)
   conn.commit()
 
-  # Masukkan data contoh (dummy data) jika database kosong supaya nampak senarai nanti
+  # Masukkan data contoh (dummy data) jika database kosong
   cursor.execute("SELECT COUNT(*) FROM pelajar")
   if cursor.fetchone()[0] == 0:
     sample_data = [
@@ -270,4 +271,5 @@ def menu_lain(call):
 
 # Jalankan bot
 print("Bot sedang berjalan...")
+bot.remove_webhook()  # Membuang webhook lama bagi mengelakkan ralat 409 Conflict
 bot.infinity_polling()
