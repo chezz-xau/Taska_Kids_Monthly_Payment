@@ -78,7 +78,7 @@ def get_main_branch_menu():
     return markup
 
 
-# Menu Penuh Khas Untuk Owner (Tanpa Butang OT)
+# Menu Penuh Khas Untuk Owner (Tanpa Butang Clock In/Out Staff & OT)
 def get_owner_sub_menu(branch_name):
     markup = ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
     markup.add(
@@ -87,10 +87,6 @@ def get_owner_sub_menu(branch_name):
     )
     markup.add(
         KeyboardButton("⏱️ Late Pick Up Charges")
-    )
-    markup.add(
-        KeyboardButton("🟢 Clock-In Staff"),
-        KeyboardButton("🔴 Clock-Out Staff")
     )
     markup.add(
         KeyboardButton("📝 Pendaftaran Baru Anak-Anak")
