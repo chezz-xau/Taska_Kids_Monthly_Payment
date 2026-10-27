@@ -14,7 +14,7 @@ TOKEN = os.environ.get("TELEGRAM_TOKEN")
 if not TOKEN:
     raise ValueError("TELEGRAM_TOKEN tidak ditetapkan dalam environment variables!")
 
-# Mengambil ID Owner daripada key OWNER_IDS di Render
+# Ambil Telegram ID Owner dari environment variable Render
 OWNER_ID_STR = os.environ.get("OWNER_IDS", "")
 OWNER_IDS = [int(i.strip()) for i in OWNER_ID_STR.split(",") if i.strip().isdigit()]
 
@@ -24,9 +24,22 @@ app = Flask(__name__)
 # Zon Masa Malaysia (UTC+8)
 MY_TZ = timezone(timedelta(hours=8))
 
-# Senarai Data Asas (2 Cawangan Sahaja)
+# Cawangan Taska
 BRANCHES_LIST = ["Taska Corner", "Taska Hadhari"]
-STAFF_LIST = ["Siti Maryam", "Adam Harith"]
+
+# Ambil senarai staf dari Environment Variables Render (dipisahkan dengan tanda koma)
+staff_corner_str = os.environ.get("STAFF_TASKA_CORNER", "Siti Maryam, Adam Harith")
+staff_hadhari_str = os.environ.get("STAFF_TASKA_HADHARI", "Siti Maryam, Adam Harith")
+
+BRANCH_STAFF = {
+    "Taska Corner": [s.strip() for s in staff_corner_str.split(",") if s.strip()],
+    "Taska Hadhari": [s.strip() for s in staff_hadhari_str.split(",") if s.strip()]
+}
+
+def get_staff_list(branch):
+    return BRANCH_STAFF.get(branch, ["Siti Maryam", "Adam Harith"])
+
+# Senarai Asas Anak-Anak
 KIDS_LIST = ["Ahmad", "Aisha", "Rayyan"]
 
 # Simpanan Sesi & Status Sementara (Dalam Memori Bot)
@@ -55,7 +68,7 @@ def get_kid_fee_data(branch, kid_name):
     return kids_fees[branch][kid_name]
 
 
-# --- KEYBOARD MENUS (2 CAWANGAN) ---
+# --- KEYBOARD MENUS ---
 def get_main_branch_menu():
     markup = ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
     markup.add(
@@ -106,7 +119,6 @@ def get_staff_sub_menu(branch_name):
     return markup
 
 
-# Fungsi untuk menentukan menu berdasarkan ID pengguna
 def get_appropriate_sub_menu(user_id, branch_name):
     if OWNER_IDS and user_id in OWNER_IDS:
         return get_owner_sub_menu(branch_name)
@@ -117,7 +129,7 @@ def get_appropriate_sub_menu(user_id, branch_name):
 # --- FLASK ROUTES ---
 @app.route("/")
 def index():
-    return "Bot Taska (2 Cawangan) sedang aktif!", 200
+    return "Bot Taska sedang aktif!", 200
 
 
 @app.route(f"/{TOKEN}", methods=["POST"])
@@ -141,7 +153,6 @@ def send_welcome(message):
     )
 
 
-# Handler Pemilihan Cawangan (Taska Corner atau Taska Hadhari)
 @bot.message_handler(
     func=lambda message: message.text in ["🏠 Taska Corner", "🏠 Taska Hadhari"]
 )
@@ -162,7 +173,6 @@ def handle_branch_selection(message):
     )
 
 
-# Handler Check-In Anak
 @bot.message_handler(
     func=lambda message: message.text and "Check-In Anak" in message.text
 )
@@ -192,7 +202,6 @@ def handle_check_in_anak(message):
     )
 
 
-# Handler Check-Out Anak
 @bot.message_handler(
     func=lambda message: message.text and "Check-Out Anak" in message.text
 )
@@ -222,7 +231,6 @@ def handle_check_out_anak(message):
     )
 
 
-# Handler Late Pick Up Charges
 @bot.message_handler(
     func=lambda message: message.text and "Late Pick Up Charges" in message.text
 )
@@ -236,7 +244,6 @@ def handle_late_pickup(message):
     )
 
 
-# Handler Clock-In Staff
 @bot.message_handler(
     func=lambda message: message.text and "Clock-In Staff" in message.text
 )
@@ -244,9 +251,10 @@ def handle_clock_in_staff(message):
     chat_id = message.chat.id
     branch = user_branches.get(chat_id, "Taska Corner")
     clocked_in_today = active_staff_clockin.get(branch, {})
+    staff_list = get_staff_list(branch)
 
     markup = InlineKeyboardMarkup()
-    for name in STAFF_LIST:
+    for name in staff_list:
         if name in clocked_in_today:
             time_str = clocked_in_today[name]
             markup.add(
@@ -266,7 +274,6 @@ def handle_clock_in_staff(message):
     )
 
 
-# Handler Clock-Out Staff
 @bot.message_handler(
     func=lambda message: message.text and "Clock-Out Staff" in message.text
 )
@@ -274,9 +281,10 @@ def handle_clock_out_staff(message):
     chat_id = message.chat.id
     branch = user_branches.get(chat_id, "Taska Corner")
     clocked_in_today = active_staff_clockin.get(branch, {})
+    staff_list = get_staff_list(branch)
     
     markup = InlineKeyboardMarkup()
-    for name in STAFF_LIST:
+    for name in staff_list:
         if name in clocked_in_today:
             time_str = clocked_in_today[name]
             markup.add(
@@ -296,7 +304,6 @@ def handle_clock_out_staff(message):
     )
 
 
-# Handler Pendaftaran Baru
 @bot.message_handler(
     func=lambda message: message.text and "Pendaftaran Baru Anak-Anak" in message.text
 )
@@ -314,7 +321,6 @@ def handle_pendaftaran_baru(message):
     )
 
 
-# Handler Keluarkan Dari Senarai
 @bot.message_handler(
     func=lambda message: message.text and "Keluarkan Dari Senarai" in message.text
 )
@@ -332,7 +338,6 @@ def handle_keluarkan_senarai(message):
     )
 
 
-# Handler Status & Bayaran Yuran
 @bot.message_handler(
     func=lambda message: message.text and "Status & Bayaran Yuran" in message.text
 )
@@ -350,7 +355,6 @@ def handle_status_yuran(message):
     )
 
 
-# Handler Laporan
 @bot.message_handler(
     func=lambda message: message.text and "Laporan" in message.text
 )
@@ -601,9 +605,10 @@ def callback_rem_type_kid(call):
 @bot.callback_query_handler(func=lambda call: call.data.startswith("rem_type_staff_"))
 def callback_rem_type_staff(call):
     branch = call.data.replace("rem_type_staff_", "")
+    staff_list = get_staff_list(branch)
     
     markup = InlineKeyboardMarkup()
-    for name in STAFF_LIST:
+    for name in staff_list:
         markup.add(
             InlineKeyboardButton(f"❌ {name}", callback_data=f"remove_staff_{branch}_{name}")
         )
@@ -639,8 +644,9 @@ def callback_remove_staff_action(call):
     branch = parts[0]
     staff_name = parts[1]
     
-    if staff_name in STAFF_LIST:
-        STAFF_LIST.remove(staff_name)
+    staff_list = get_staff_list(branch)
+    if staff_name in staff_list:
+        staff_list.remove(staff_name)
         
     bot.answer_callback_query(call.id, f"{staff_name} telah dikeluarkan!")
     bot.edit_message_text(
