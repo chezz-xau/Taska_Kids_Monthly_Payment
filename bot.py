@@ -7,9 +7,6 @@ from datetime import datetime
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 DATABASE_URL = os.environ.get("DATABASE_URL")
-# Membaca senarai ADMIN_ID dan memisahkan mengikut koma
-admin_env = os.environ.get("ADMIN_ID", "")
-ADMIN_LIST = [aid.strip() for aid in admin_env.split(",") if aid.strip()]
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
@@ -72,48 +69,30 @@ def webhook():
 def index():
     return "Bot Taska Admin & Staf sedang aktif!"
 
-# --- 3. MENU UTAMA (BERDASARKAN ADMIN ATAU STAF) ---
+# --- 3. MENU UTAMA (PAPAR SEMUA MENU LENGKAP) ---
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    user_id = str(message.from_user.id)
     markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("📊 Laporan", callback_data="menu_laporan"))
+    markup.add(types.InlineKeyboardButton("📝 Pendaftaran Baru Anak-Anak", callback_data="pendaftaran"))
+    markup.add(types.InlineKeyboardButton("❌ Keluarkan Dari Senarai", callback_data="keluarkan"))
+    markup.add(types.InlineKeyboardButton("👶 Check-In/Out Anak-Anak", callback_data="m_ci"))
+    markup.add(types.InlineKeyboardButton("🕒 Staff Clock In / Out", callback_data="m_sc"))
     
-    if user_id in ADMIN_LIST:
-        # MENU ADMIN
-        markup.add(types.InlineKeyboardButton("📊 Laporan", callback_data="menu_laporan"))
-        markup.add(types.InlineKeyboardButton("📝 Pendaftaran Baru Anak-Anak", callback_data="pendaftaran"))
-        markup.add(types.InlineKeyboardButton("❌ Keluarkan Dari Senarai", callback_data="keluarkan"))
-        markup.add(types.InlineKeyboardButton("👶 Check-In/Out Anak-Anak", callback_data="m_ci"))
-        markup.add(types.InlineKeyboardButton("🕒 Staff Clock In / Out", callback_data="m_sc"))
-        
-        bot.send_message(message.chat.id, "👑 **Menu Utama Admin Taska**\nSila pilih tindakan di bawah:", reply_markup=markup, parse_mode="Markdown")
-    else:
-        # MENU STAF
-        markup.add(types.InlineKeyboardButton("👶 Check-In/Out Anak-Anak", callback_data="m_ci"))
-        markup.add(types.InlineKeyboardButton("🕒 Staff Clock In / Out", callback_data="m_sc"))
-        
-        bot.send_message(message.chat.id, "👩‍💼 **Menu Utama Staf Taska**\nSila pilih tindakan di bawah:", reply_markup=markup, parse_mode="Markdown")
+    bot.send_message(message.chat.id, "👑 **Menu Utama Taska (Admin & Staf)**\nSila pilih tindakan di bawah:", reply_markup=markup, parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda call: call.data == "back_start")
 def back_to_start(call):
-    user_id = str(call.from_user.id)
     markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("📊 Laporan", callback_data="menu_laporan"))
+    markup.add(types.InlineKeyboardButton("📝 Pendaftaran Baru Anak-Anak", callback_data="pendaftaran"))
+    markup.add(types.InlineKeyboardButton("❌ Keluarkan Dari Senarai", callback_data="keluarkan"))
+    markup.add(types.InlineKeyboardButton("👶 Check-In/Out Anak-Anak", callback_data="m_ci"))
+    markup.add(types.InlineKeyboardButton("🕒 Staff Clock In / Out", callback_data="m_sc"))
     
-    if user_id in ADMIN_LIST:
-        markup.add(types.InlineKeyboardButton("📊 Laporan", callback_data="menu_laporan"))
-        markup.add(types.InlineKeyboardButton("📝 Pendaftaran Baru Anak-Anak", callback_data="pendaftaran"))
-        markup.add(types.InlineKeyboardButton("❌ Keluarkan Dari Senarai", callback_data="keluarkan"))
-        markup.add(types.InlineKeyboardButton("👶 Check-In/Out Anak-Anak", callback_data="m_ci"))
-        markup.add(types.InlineKeyboardButton("🕒 Staff Clock In / Out", callback_data="m_sc"))
-        
-        bot.edit_message_text("👑 **Menu Utama Admin Taska**\nSila pilih tindakan di bawah:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
-    else:
-        markup.add(types.InlineKeyboardButton("👶 Check-In/Out Anak-Anak", callback_data="m_ci"))
-        markup.add(types.InlineKeyboardButton("🕒 Staff Clock In / Out", callback_data="m_sc"))
-        
-        bot.edit_message_text("👩‍💼 **Menu Utama Staf Taska**\nSila pilih tindakan di bawah:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+    bot.edit_message_text("👑 **Menu Utama Taska (Admin & Staf)**\nSila pilih tindakan di bawah:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
-# --- 4. MENU LAPORAN & PEMBAYARAN (ADMIN) ---
+# --- 4. MENU LAPORAN & PEMBAYARAN ---
 @bot.callback_query_handler(func=lambda call: call.data == "menu_laporan")
 def menu_laporan(call):
     markup = types.InlineKeyboardMarkup()
@@ -169,7 +148,7 @@ def papar_senarai_status(call):
     markup.add(types.InlineKeyboardButton("🔙 Kembali", callback_data=f"cawangan_{caw_key}"))
     bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
-# --- 5. PENDAFTARAN & PADAM NAMA (ADMIN) ---
+# --- 5. PENDAFTARAN & PADAM NAMA ---
 @bot.callback_query_handler(func=lambda call: call.data == "pendaftaran")
 def pendaftaran_mulai(call):
     bot.edit_message_text("📝 **Pendaftaran Baru**\n\nSila hantar nama penuh anak:", call.message.chat.id, call.message.message_id, reply_markup=types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 Batal", callback_data="back_start")), parse_mode="Markdown")
@@ -246,7 +225,7 @@ def proses_padam(call):
         markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 Menu Utama", callback_data="back_start"))
         bot.edit_message_text(f"🗑️ *{nama}* dari *{cawangan}* telah dipadam.", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
-# --- 6. CHECK-IN / CHECK-OUT ANAK-ANAK (UNTUK STAF & ADMIN) ---
+# --- 6. CHECK-IN / CHECK-OUT ANAK-ANAK ---
 @bot.callback_query_handler(func=lambda call: call.data == "m_ci")
 def menu_checkin(call):
     markup = types.InlineKeyboardMarkup()
