@@ -363,20 +363,22 @@ def handle_laporan(message):
     report_text += f"👶 **Anak Sedang Check-In:**\n"
     if checked_in_kids:
         for name, time_str in checked_in_kids.items():
-            report_text += f"• **{name}** — Check-In pada *{time_str}*\n"
+            # Format: Garis di bawah nama (underline) & status warna hijau
+            report_text += f"• <u>{name}</u> — 🟢 Check-In pada *{time_str}*\n"
     else:
         report_text += "• Tiada\n"
         
     report_text += f"\n👤 **Staff Hadir (Clock-In):**\n"
     if clocked_staff:
         for name, time_str in clocked_staff.items():
-            report_text += f"• **{name}** — Clock-In pada *{time_str}*\n"
+            # Format: Garis di bawah nama (underline) & status warna hijau
+            report_text += f"• <u>{name}</u> — 🟢 Clock-In pada *{time_str}*\n"
     else:
         report_text += "• Tiada\n"
 
     reply_markup = get_appropriate_sub_menu(user_id, branch)
     bot.reply_to(
-        message, report_text, parse_mode="Markdown", reply_markup=reply_markup
+        message, report_text, parse_mode="HTML", reply_markup=reply_markup
     )
 
 
