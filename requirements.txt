@@ -2,6 +2,8 @@ pyTelegramBotAPI
 flask
 requests
 pandas
+psycopg2-binary
+
 
 
 
