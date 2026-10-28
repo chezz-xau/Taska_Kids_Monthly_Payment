@@ -30,6 +30,7 @@ def init_db():
         ''')
         cursor.execute("ALTER TABLE pelajar ADD COLUMN IF NOT EXISTS yuran_kena_bayar NUMERIC DEFAULT 0;")
         cursor.execute("ALTER TABLE pelajar ADD COLUMN IF NOT EXISTS jumlah_dibayar NUMERIC DEFAULT 0;")
+        cursor.execute("ALTER TABLE pelajar ADD COLUMN IF NOT EXISTS bulan_bayaran TEXT DEFAULT '-';")
         conn.commit()
         cursor.close()
         conn.close()
@@ -61,10 +62,9 @@ if render_url:
     except Exception as e:
         print(f"Webhook Error: {e}")
 
-# --- 3. MENU UTAMA ADMIN (DENGAN PEMADAM KEKUNCI BAWAH) ---
+# --- 3. MENU UTAMA ADMIN ---
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    # Buang terus kekunci bawah lama dengan ReplyKeyboardRemove
     remove_markup = types.ReplyKeyboardRemove()
     temp_msg = bot.send_message(message.chat.id, "🔄 Memuatkan menu utama...", reply_markup=remove_markup)
     try:
@@ -120,7 +120,7 @@ def handle_admin_callbacks(call):
             bot.edit_message_text(f"📝 Pendaftaran untuk **{cawangan}**.\n\nSila hantar **Nama Penuh Anak**:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
             bot.register_next_step_handler(call.message, terima_nama_pelajar)
 
-        # --- SENARAI NAMA PELAJAR (DISUSUN ABJAD & BERKOD NOMBOR) ---
+        # --- SENARAI NAMA PELAJAR ---
         elif data == "adm_senarai":
             conn = get_db_connection()
             cursor = conn.cursor()
@@ -145,21 +145,23 @@ def handle_admin_callbacks(call):
             p_id = data.split("_")[1]
             conn = get_db_connection()
             cursor = conn.cursor()
-            cursor.execute("SELECT nama, cawangan, yuran_kena_bayar, jumlah_dibayar, status_bayaran FROM pelajar WHERE id = %s", (p_id,))
+            cursor.execute("SELECT nama, cawangan, yuran_kena_bayar, jumlah_dibayar, status_bayaran, bulan_bayaran FROM pelajar WHERE id = %s", (p_id,))
             res = cursor.fetchone()
             cursor.close()
             conn.close()
 
             if res:
-                nama, cawangan, yuran, bayar, status = res
+                nama, cawangan, yuran, bayar, status, bulan = res
                 yuran_val = float(yuran) if yuran else 0.0
                 bayar_val = float(bayar) if bayar else 0.0
                 baki = yuran_val - bayar_val
+                bulan_info = bulan if bulan else "-"
                 
                 text = (
                     f"👤 **Maklumat Pelajar**\n\n"
                     f"• **Nama:** {nama}\n"
                     f"• **Cawangan:** {cawangan}\n"
+                    f"• **Bulan Bayaran:** {bulan_info}\n"
                     f"• **Yuran Kena Bayar:** RM {yuran_val:.2f}\n"
                     f"• **Sudah Bayar:** RM {bayar_val:.2f}\n"
                     f"• **Baki:** RM {baki:.2f}\n"
@@ -207,8 +209,8 @@ def handle_admin_callbacks(call):
             p_id = data.split("_")[1]
             admin_temp_data[chat_id] = {"edit_id": p_id}
             markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("❌ Batal", callback_data="adm_yuran"))
-            bot.edit_message_text("💵 Sila hantar **jumlah yuran penuh** (Contoh: `350`):", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
-            bot.register_next_step_handler(call.message, terima_jumlah_yuran)
+            bot.edit_message_text("📅 Sila hantar **Bulan dan Tahun Bayaran**\n(Contoh: `November 2026`):", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            bot.register_next_step_handler(call.message, terima_bulan_bayaran)
 
     except Exception as e:
         bot.answer_callback_query(call.id, f"Ralat: {str(e)[:50]}", show_alert=True)
@@ -253,7 +255,7 @@ def terima_yuran_pendaftaran(message):
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO pelajar (nama, cawangan, yuran_kena_bayar, jumlah_dibayar, status_bayaran) VALUES (%s, %s, %s, 0, 'Belum Lunas')",
+            "INSERT INTO pelajar (nama, cawangan, yuran_kena_bayar, jumlah_dibayar, status_bayaran, bulan_bayaran) VALUES (%s, %s, %s, 0, 'Belum Lunas', '-')",
             (nama, cawangan, yuran)
         )
         conn.commit()
@@ -264,6 +266,22 @@ def terima_yuran_pendaftaran(message):
         bot.send_message(chat_id, f"✅ Berjaya mendaftarkan **{nama}** di **{cawangan}** dengan yuran RM {yuran:.2f}!", reply_markup=markup, parse_mode="Markdown")
     except Exception as e:
         bot.send_message(chat_id, f"❌ Ralat database: {e}")
+
+def terima_bulan_bayaran(message):
+    if message.text and message.text.startswith("/"):
+        return
+    chat_id = message.chat.id
+    
+    if chat_id not in admin_temp_data:
+        bot.send_message(chat_id, "⚠️ Sesi tamat. Sila mula semula dari /start.")
+        return
+    
+    bulan = message.text.strip()
+    admin_temp_data[chat_id]["bulan"] = bulan
+    
+    markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("❌ Batal", callback_data="adm_yuran"))
+    bot.send_message(chat_id, f"💵 Sila hantar **jumlah yuran penuh** untuk bulan **{bulan}** (Contoh: `350`):", reply_markup=markup, parse_mode="Markdown")
+    bot.register_next_step_handler(message, terima_jumlah_yuran)
 
 def terima_jumlah_yuran(message):
     if message.text and message.text.startswith("/"):
@@ -304,6 +322,7 @@ def terima_jumlah_dibayar(message):
 
     data = admin_temp_data.pop(chat_id)
     p_id = data["edit_id"]
+    bulan = data["bulan"]
     yuran = data["yuran"]
 
     status = "Lunas" if dibayar >= yuran else "Belum Lunas"
@@ -313,8 +332,8 @@ def terima_jumlah_dibayar(message):
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "UPDATE pelajar SET yuran_kena_bayar = %s, jumlah_dibayar = %s, status_bayaran = %s WHERE id = %s",
-            (yuran, dibayar, status, p_id)
+            "UPDATE pelajar SET yuran_kena_bayar = %s, jumlah_dibayar = %s, status_bayaran = %s, bulan_bayaran = %s WHERE id = %s",
+            (yuran, dibayar, status, bulan, p_id)
         )
         cursor.execute("SELECT nama FROM pelajar WHERE id = %s", (p_id,))
         res = cursor.fetchone()
@@ -327,10 +346,11 @@ def terima_jumlah_dibayar(message):
         bot.send_message(
             chat_id,
             f"✅ Maklumat yuran **{nama_pelajar}** dikemaskini!\n\n"
+            f"• **Bulan:** {bulan}\n"
             f"• Kena Bayar: RM {yuran:.2f}\n"
             f"• Sudah Bayar: RM {dibayar:.2f}\n"
             f"• Baki: RM {baki:.2f}\n"
-            f"• Status: **$status**",
+            f"• Status: **{status}**",
             reply_markup=markup,
             parse_mode="Markdown"
         )
