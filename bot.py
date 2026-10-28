@@ -110,6 +110,7 @@ def handle_all_callbacks(call):
         if res:
             nama, cawangan = res
             markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 Menu Utama", callback_data="back_start"))
+            bot.answer_callback_query(call.id, f"{nama} berjaya Check-In!")
             bot.edit_message_text(f"✅ *{nama}* ({cawangan}) berjaya Check-In pada *{waktu_sekarang}*!", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
     elif call.data == "ci_man":
