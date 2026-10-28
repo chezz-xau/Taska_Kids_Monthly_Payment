@@ -78,7 +78,38 @@ def send_welcome(message):
     
     bot.send_message(message.chat.id, "👩‍💼 **Menu Utama Staf Taska**\nSila pilih tindakan di bawah:", reply_markup=markup, parse_mode="Markdown")
 
-# --- 4. CENTRALIZED CALLBACK HANDLER ---
+# --- 4. KHAS UNTUK BUTANG LIVE (CHECK-IN SEMASA) ---
+@bot.callback_query_handler(func=lambda call: call.data.startswith("live_"))
+def process_live_checkin(call):
+    try:
+        bot.answer_callback_query(call.id)
+    except:
+        pass
+    
+    parts = call.data.split("_")
+    p_id = parts[1]
+    waktu_sekarang = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
+    
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE pelajar SET status_hadir = 'Check-In' WHERE id = %s", (p_id,))
+        cursor.execute("SELECT nama, cawangan FROM pelajar WHERE id = %s", (p_id,))
+        res = cursor.fetchone()
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 Menu Utama", callback_data="back_start"))
+        if res:
+            nama, cawangan = res
+            bot.edit_message_text(f"✅ *{nama}* ({cawangan}) berjaya Check-In pada *{waktu_sekarang}*!", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+        else:
+            bot.edit_message_text(f"✅ Pelajar berjaya Check-In pada *{waktu_sekarang}*!", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+    except Exception as e:
+        bot.answer_callback_query(call.id, f"Ralat: {e}", show_alert=True)
+
+# --- 5. CENTRALIZED CALLBACK HANDLER UNTUK BUTANG LAIN ---
 @bot.callback_query_handler(func=lambda call: True)
 def handle_all_callbacks(call):
     try:
@@ -109,27 +140,6 @@ def handle_all_callbacks(call):
                 markup.add(types.InlineKeyboardButton(f"⚡ {nama} ({short_caw})", callback_data=f"live_{p_id}"))
         markup.add(types.InlineKeyboardButton("🔙 Kembali", callback_data="m_ci"))
         bot.edit_message_text("⚡ [Live] Pilih anak untuk Check-In sekarang:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
-
-    elif call.data.startswith("live_"):
-        parts = call.data.split("_")
-        p_id = parts[1]
-        waktu_sekarang = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
-        
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("UPDATE pelajar SET status_hadir = 'Check-In' WHERE id = %s", (p_id,))
-        cursor.execute("SELECT nama, cawangan FROM pelajar WHERE id = %s", (p_id,))
-        res = cursor.fetchone()
-        conn.commit()
-        cursor.close()
-        conn.close()
-        
-        markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 Menu Utama", callback_data="back_start"))
-        if res:
-            nama, cawangan = res
-            bot.edit_message_text(f"✅ *{nama}* ({cawangan}) berjaya Check-In pada *{waktu_sekarang}*!", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
-        else:
-            bot.edit_message_text(f"✅ Pelajar berjaya Check-In pada *{waktu_sekarang}*!", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
     elif call.data == "ci_man":
         conn = get_db_connection()
@@ -173,7 +183,7 @@ def handle_all_callbacks(call):
         bot.edit_message_text(f"🕒 Sila hantar **nama penuh anda** untuk {action}:", call.message.chat.id, call.message.message_id, reply_markup=types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("❌ Batal", callback_data="m_sc")), parse_mode="Markdown")
         bot.register_next_step_handler(call.message, simpan_staff_clock)
 
-# --- 5. NEXT STEP HANDLERS ---
+# --- 6. NEXT STEP HANDLERS ---
 def terima_masa_manual(message):
     if message.text and message.text.startswith("/"):
         return
@@ -225,7 +235,7 @@ def simpan_staff_clock(message):
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Ralat database: {e}")
 
-# --- 6. LOCAL RUN ---
+# --- 7. LOCAL RUN ---
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
