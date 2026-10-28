@@ -43,7 +43,7 @@ def init_db():
 
 init_db()
 
-# --- 2. WEBHOOK ROUTE ---
+# --- 2. WEBHOOK ROUTE & AUTO-SETUP ---
 @app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
     if request.headers.get("content-type") == "application/json":
@@ -57,6 +57,12 @@ def webhook():
 @app.route("/")
 def index():
     return "Bot Staf Taska sedang aktif!"
+
+# Tetapkan webhook secara automatik semasa aplikasi mula berjalan di Render
+render_url = os.environ.get("RENDER_EXTERNAL_URL")
+if render_url:
+    bot.remove_webhook()
+    bot.set_webhook(url=f"{render_url}/{TOKEN}")
 
 # --- 3. MENU UTAMA STAF ---
 @bot.message_handler(commands=['start'])
@@ -198,11 +204,7 @@ def simpan_staff_clock(message):
     markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 Menu Utama", callback_data="back_start"))
     bot.send_message(message.chat.id, f"✅ *{staff_name}* berjaya *{action}* pada *{waktu_sekarang}*.", reply_markup=markup, parse_mode="Markdown")
 
-# --- 6. JALANKAN WEBHOOK ---
+# --- 6. LOCAL RUN (Fallback) ---
 if __name__ == "__main__":
-    render_url = os.environ.get("RENDER_EXTERNAL_URL")
-    if render_url:
-        bot.remove_webhook()
-        bot.set_webhook(url=f"{render_url}/{TOKEN}")
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
