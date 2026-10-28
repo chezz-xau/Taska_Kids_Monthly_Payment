@@ -95,7 +95,8 @@ def handle_all_callbacks(call):
         bot.edit_message_text("⚡ [Live] Pilih anak untuk Check-In sekarang:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
     elif call.data.startswith("live_"):
-        p_id = call.data.split("_")[1]
+        parts = call.data.split("_")
+        p_id = parts[1]
         waktu_sekarang = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
         
         conn = get_db_connection()
@@ -107,11 +108,14 @@ def handle_all_callbacks(call):
         cursor.close()
         conn.close()
         
+        bot.answer_callback_query(call.id, "Berjaya Check-In!")
+        
         if res:
             nama, cawangan = res
             markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 Menu Utama", callback_data="back_start"))
-            bot.answer_callback_query(call.id, f"{nama} berjaya Check-In!")
             bot.edit_message_text(f"✅ *{nama}* ({cawangan}) berjaya Check-In pada *{waktu_sekarang}*!", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+        else:
+            bot.edit_message_text(f"✅ Pelajar ID {p_id} berjaya Check-In pada *{waktu_sekarang}*!", call.message.chat.id, call.message.message_id, reply_markup=types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 Menu Utama", callback_data="back_start")), parse_mode="Markdown")
 
     elif call.data == "ci_man":
         conn = get_db_connection()
