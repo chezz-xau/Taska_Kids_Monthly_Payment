@@ -100,12 +100,12 @@ def list_pelajar_terkini(call):
             p_id, nama, cawangan, status = row
             icon = "🟢" if status == "Check-In" else "🔴"
             short_caw = "Corner" if cawangan == "Taska Corner" else "Hadhari"
-            markup.add(types.InlineKeyboardButton(f"{icon} {nama} ({short_caw})", callback_data=f"cl_{p_id}"))
+            markup.add(types.InlineKeyboardButton(f"{icon} {nama} ({short_caw})", callback_data=f"live_{p_id}"))
     markup.add(types.InlineKeyboardButton("🔙 Kembali", callback_data="m_ci"))
     
-    bot.edit_message_text("⚡ Klik nama anak untuk Check-In masa sekarang:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+    bot.edit_message_text("⚡ [Live] Klik nama anak untuk Check-In masa sekarang:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("cl_"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("live_"))
 def proses_ci_live(call):
     p_id = call.data.split("_")[1]
     waktu_sekarang = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
