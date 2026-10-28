@@ -18,28 +18,31 @@ def get_db_connection():
 
 # --- 1. SETUP DATABASE ---
 def init_db():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS pelajar (
-            id SERIAL PRIMARY KEY,
-            nama TEXT,
-            cawangan TEXT,
-            status_bayaran TEXT DEFAULT 'Belum Bayar',
-            status_hadir TEXT DEFAULT 'Check-Out'
-        )
-    ''')
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS staff_attendance (
-            id SERIAL PRIMARY KEY,
-            staff_name TEXT,
-            action_type TEXT,
-            timestamp TEXT
-        )
-    ''')
-    conn.commit()
-    cursor.close()
-    conn.close()
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS pelajar (
+                id SERIAL PRIMARY KEY,
+                nama TEXT,
+                cawangan TEXT,
+                status_bayaran TEXT DEFAULT 'Belum Bayar',
+                status_hadir TEXT DEFAULT 'Check-Out'
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS staff_attendance (
+                id SERIAL PRIMARY KEY,
+                staff_name TEXT,
+                action_type TEXT,
+                timestamp TEXT
+            )
+        ''')
+        conn.commit()
+        cursor.close()
+        conn.close()
+    except Exception as e:
+        print(f"DB Error: {e}")
 
 init_db()
 
@@ -58,11 +61,13 @@ def webhook():
 def index():
     return "Bot Staf Taska sedang aktif!"
 
-# Tetapkan webhook secara automatik semasa aplikasi mula berjalan di Render
 render_url = os.environ.get("RENDER_EXTERNAL_URL")
 if render_url:
-    bot.remove_webhook()
-    bot.set_webhook(url=f"{render_url}/{TOKEN}")
+    try:
+        bot.remove_webhook()
+        bot.set_webhook(url=f"{render_url}/{TOKEN}")
+    except Exception as e:
+        print(f"Webhook Error: {e}")
 
 # --- 3. MENU UTAMA STAF ---
 @bot.message_handler(commands=['start'])
@@ -76,6 +81,11 @@ def send_welcome(message):
 # --- 4. CENTRALIZED CALLBACK HANDLER ---
 @bot.callback_query_handler(func=lambda call: True)
 def handle_all_callbacks(call):
+    try:
+        bot.answer_callback_query(call.id)
+    except:
+        pass
+
     if call.data == "m_ci":
         markup = types.InlineKeyboardMarkup()
         markup.add(types.InlineKeyboardButton("⚡ Check-In Masa Terkini", callback_data="ci_live"))
@@ -114,14 +124,12 @@ def handle_all_callbacks(call):
         cursor.close()
         conn.close()
         
-        bot.answer_callback_query(call.id, "Berjaya Check-In!")
-        
+        markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 Menu Utama", callback_data="back_start"))
         if res:
             nama, cawangan = res
-            markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 Menu Utama", callback_data="back_start"))
             bot.edit_message_text(f"✅ *{nama}* ({cawangan}) berjaya Check-In pada *{waktu_sekarang}*!", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
         else:
-            bot.edit_message_text(f"✅ Pelajar ID {p_id} berjaya Check-In pada *{waktu_sekarang}*!", call.message.chat.id, call.message.message_id, reply_markup=types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 Menu Utama", callback_data="back_start")), parse_mode="Markdown")
+            bot.edit_message_text(f"✅ Pelajar berjaya Check-In pada *{waktu_sekarang}*!", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
     elif call.data == "ci_man":
         conn = get_db_connection()
@@ -167,44 +175,57 @@ def handle_all_callbacks(call):
 
 # --- 5. NEXT STEP HANDLERS ---
 def terima_masa_manual(message):
-    if message.text.startswith("/"): return
+    if message.text and message.text.startswith("/"):
+        return
     p_id = user_temp_data.get(message.chat.id)
-    masa_manual = message.text.strip()
-    if not p_id: return
+    if not p_id:
+        bot.send_message(message.chat.id, "⚠️ Sesi telah tamat. Sila pilih semula menu Check-In Manual.")
+        return
     
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("UPDATE pelajar SET status_hadir = 'Check-In' WHERE id = %s", (p_id,))
-    cursor.execute("SELECT nama, cawangan FROM pelajar WHERE id = %s", (p_id,))
-    res = cursor.fetchone()
-    conn.commit()
-    cursor.close()
-    conn.close()
-    user_temp_data.pop(message.chat.id, None)
+    masa_manual = message.text.strip() if message.text else "08:30 AM"
     
-    if res:
-        nama, cawangan = res
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE pelajar SET status_hadir = 'Check-In' WHERE id = %s", (p_id,))
+        cursor.execute("SELECT nama, cawangan FROM pelajar WHERE id = %s", (p_id,))
+        res = cursor.fetchone()
+        conn.commit()
+        cursor.close()
+        conn.close()
+        user_temp_data.pop(message.chat.id, None)
+        
         markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 Menu Utama", callback_data="back_start"))
-        bot.send_message(message.chat.id, f"✅ *{nama}* ({cawangan}) direkodkan masuk pada *{masa_manual}*.", reply_markup=markup, parse_mode="Markdown")
+        if res:
+            nama, cawangan = res
+            bot.send_message(message.chat.id, f"✅ *{nama}* ({cawangan}) direkodkan masuk pada *{masa_manual}*.", reply_markup=markup, parse_mode="Markdown")
+        else:
+            bot.send_message(message.chat.id, f"✅ Pelajar berjaya direkodkan masuk pada *{masa_manual}*.", reply_markup=markup, parse_mode="Markdown")
+    except Exception as e:
+        bot.send_message(message.chat.id, f"❌ Ralat database: {e}")
 
 def simpan_staff_clock(message):
-    if message.text.startswith("/"): return
-    staff_name = message.text.strip()
+    if message.text and message.text.startswith("/"):
+        return
+    staff_name = message.text.strip() if message.text else "Staf"
     action = user_temp_data.get(message.chat.id, "Clock In")
     waktu_sekarang = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
     
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO staff_attendance (staff_name, action_type, timestamp) VALUES (%s, %s, %s)", (staff_name, action, waktu_sekarang))
-    conn.commit()
-    cursor.close()
-    conn.close()
-    user_temp_data.pop(message.chat.id, None)
-    
-    markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 Menu Utama", callback_data="back_start"))
-    bot.send_message(message.chat.id, f"✅ *{staff_name}* berjaya *{action}* pada *{waktu_sekarang}*.", reply_markup=markup, parse_mode="Markdown")
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO staff_attendance (staff_name, action_type, timestamp) VALUES (%s, %s, %s)", (staff_name, action, waktu_sekarang))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        user_temp_data.pop(message.chat.id, None)
+        
+        markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 Menu Utama", callback_data="back_start"))
+        bot.send_message(message.chat.id, f"✅ *{staff_name}* berjaya *{action}* pada *{waktu_sekarang}*.", reply_markup=markup, parse_mode="Markdown")
+    except Exception as e:
+        bot.send_message(message.chat.id, f"❌ Ralat database: {e}")
 
-# --- 6. LOCAL RUN (Fallback) ---
+# --- 6. LOCAL RUN ---
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
