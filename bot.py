@@ -80,7 +80,7 @@ def handle_all_callbacks(call):
     elif call.data == "ci_live":
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT id, nama, cawangan, status_hadir FROM pelajar ORDER BY cawangan, nama")
+        cursor.execute("SELECT id, nama, cawangan FROM pelajar ORDER BY cawangan, nama")
         pelajar_list = cursor.fetchall()
         cursor.close()
         conn.close()
@@ -88,12 +88,11 @@ def handle_all_callbacks(call):
         markup = types.InlineKeyboardMarkup()
         if pelajar_list:
             for row in pelajar_list:
-                p_id, nama, cawangan, status = row
-                icon = "🟢" if status == "Check-In" else "🔴"
+                p_id, nama, cawangan = row
                 short_caw = "Corner" if cawangan == "Taska Corner" else "Hadhari"
-                markup.add(types.InlineKeyboardButton(f"{icon} {nama} ({short_caw})", callback_data=f"live_{p_id}"))
+                markup.add(types.InlineKeyboardButton(f"⚡ {nama} ({short_caw})", callback_data=f"live_{p_id}"))
         markup.add(types.InlineKeyboardButton("🔙 Kembali", callback_data="m_ci"))
-        bot.edit_message_text("⚡ [Live] Klik nama anak untuk Check-In masa sekarang:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+        bot.edit_message_text("⚡ [Live] Pilih anak untuk Check-In sekarang:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
     elif call.data.startswith("live_"):
         p_id = call.data.split("_")[1]
