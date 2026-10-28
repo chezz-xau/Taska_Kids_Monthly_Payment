@@ -20,7 +20,6 @@ def init_db():
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        # Buat jadual jika belum ada
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS pelajar (
                 id SERIAL PRIMARY KEY,
@@ -29,7 +28,6 @@ def init_db():
                 status_bayaran TEXT DEFAULT 'Belum Lunas'
             )
         ''')
-        # Pastikan kolum yuran wujud walaupun jadual lama dah ada
         cursor.execute("ALTER TABLE pelajar ADD COLUMN IF NOT EXISTS yuran_kena_bayar NUMERIC DEFAULT 0;")
         cursor.execute("ALTER TABLE pelajar ADD COLUMN IF NOT EXISTS jumlah_dibayar NUMERIC DEFAULT 0;")
         conn.commit()
@@ -83,7 +81,7 @@ def menu_utama_admin(chat_id, message_id=None, is_new=False):
         except:
             bot.send_message(chat_id, text, reply_markup=markup, parse_mode="Markdown")
 
-# --- 4. CALLBACK HANDLER UTAMA DENGAN PELINDUNG RALAT ---
+# --- 4. CALLBACK HANDLER UTAMA ---
 @bot.callback_query_handler(func=lambda call: True)
 def handle_admin_callbacks(call):
     chat_id = call.message.chat.id
@@ -114,26 +112,27 @@ def handle_admin_callbacks(call):
             bot.edit_message_text(f"📝 Pendaftaran untuk **{cawangan}**.\n\nSila hantar **Nama Penuh Anak**:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
             bot.register_next_step_handler(call.message, terima_nama_pelajar)
 
-        # --- SENARAI NAMA PELAJAR ---
+        # --- SENARAI NAMA PELAJAR (DISUSUN ABJAD & BERKOD NOMBOR) ---
         elif data == "adm_senarai":
             conn = get_db_connection()
             cursor = conn.cursor()
-            cursor.execute("SELECT id, nama, cawangan FROM pelajar ORDER BY cawangan, nama")
+            # Disusun mengikut abjad nama (ASC)
+            cursor.execute("SELECT id, nama, cawangan FROM pelajar ORDER BY nama ASC")
             rows = cursor.fetchall()
             cursor.close()
             conn.close()
 
             markup = types.InlineKeyboardMarkup()
             if rows:
-                for r in rows:
+                for index, r in enumerate(rows, start=1):
                     p_id, nama, cawangan = r
                     short_caw = "Corner" if cawangan == "Taska Corner" else "Hadhari"
-                    markup.add(types.InlineKeyboardButton(f"👤 {nama} ({short_caw})", callback_data=f"detail_{p_id}"))
+                    markup.add(types.InlineKeyboardButton(f"{index}. {nama} ({short_caw})", callback_data=f"detail_{p_id}"))
             else:
                 markup.add(types.InlineKeyboardButton("➕ Daftar Pelajar Baru", callback_data="adm_daftar"))
             
             markup.add(types.InlineKeyboardButton("🔙 Menu Utama", callback_data="back_start"))
-            bot.edit_message_text("📋 **Senarai Nama Pelajar**\nKlik nama pelajar untuk lihat butiran lanjut:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            bot.edit_message_text("📋 **Senarai Nama Pelajar (Disusun A-Z)**\nKlik nama pelajar untuk lihat butiran lanjut:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
         elif data.startswith("detail_"):
             p_id = data.split("_")[1]
@@ -178,24 +177,24 @@ def handle_admin_callbacks(call):
             markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 Senarai Pelajar", callback_data="adm_senarai"))
             bot.edit_message_text("🗑️ Rekod pelajar telah berjaya dipadam.", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
-        # --- SEMAK & KEMASKINI YURAN ---
+        # --- SEMAK & KEMASKINI YURAN (DISUSUN ABJAD JUGA) ---
         elif data == "adm_yuran":
             conn = get_db_connection()
             cursor = conn.cursor()
-            cursor.execute("SELECT id, nama, cawangan, status_bayaran FROM pelajar ORDER BY cawangan, nama")
+            cursor.execute("SELECT id, nama, cawangan, status_bayaran FROM pelajar ORDER BY nama ASC")
             rows = cursor.fetchall()
             cursor.close()
             conn.close()
 
             markup = types.InlineKeyboardMarkup()
             if rows:
-                for r in rows:
+                for index, r in enumerate(rows, start=1):
                     p_id, nama, cawangan, status = r
                     icon = "🟢" if status == "Lunas" else "🔴"
                     short_caw = "Corner" if cawangan == "Taska Corner" else "Hadhari"
-                    markup.add(types.InlineKeyboardButton(f"{icon} {nama} ({status})", callback_data=f"pay_{p_id}"))
+                    markup.add(types.InlineKeyboardButton(f"{index}. {icon} {nama} ({status})", callback_data=f"pay_{p_id}"))
             markup.add(types.InlineKeyboardButton("🔙 Menu Utama", callback_data="back_start"))
-            bot.edit_message_text("💰 **Pengurusan Yuran Bulanan**\nPilih pelajar untuk kemaskini bayaran:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            bot.edit_message_text("💰 **Pengurusan Yuran Bulanan (Disusun A-Z)**\nPilih pelajar untuk kemaskini bayaran:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
         elif data.startswith("pay_"):
             p_id = data.split("_")[1]
