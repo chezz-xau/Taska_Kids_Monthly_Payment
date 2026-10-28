@@ -61,10 +61,18 @@ if render_url:
     except Exception as e:
         print(f"Webhook Error: {e}")
 
-# --- 3. MENU UTAMA ADMIN ---
+# --- 3. MENU UTAMA ADMIN (DENGAN PEMADAM KEKUNCI BAWAH) ---
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    menu_utama_admin(message.chat.id, message.message_id, is_new=True)
+    # Buang terus kekunci bawah lama dengan ReplyKeyboardRemove
+    remove_markup = types.ReplyKeyboardRemove()
+    temp_msg = bot.send_message(message.chat.id, "🔄 Memuatkan menu utama...", reply_markup=remove_markup)
+    try:
+        bot.delete_message(message.chat.id, temp_msg.message_id)
+    except:
+        pass
+        
+    menu_utama_admin(message.chat.id, is_new=True)
 
 def menu_utama_admin(chat_id, message_id=None, is_new=False):
     markup = types.InlineKeyboardMarkup()
@@ -116,7 +124,6 @@ def handle_admin_callbacks(call):
         elif data == "adm_senarai":
             conn = get_db_connection()
             cursor = conn.cursor()
-            # Disusun mengikut abjad nama (ASC)
             cursor.execute("SELECT id, nama, cawangan FROM pelajar ORDER BY nama ASC")
             rows = cursor.fetchall()
             cursor.close()
@@ -177,7 +184,7 @@ def handle_admin_callbacks(call):
             markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 Senarai Pelajar", callback_data="adm_senarai"))
             bot.edit_message_text("🗑️ Rekod pelajar telah berjaya dipadam.", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
-        # --- SEMAK & KEMASKINI YURAN (DISUSUN ABJAD JUGA) ---
+        # --- SEMAK & KEMASKINI YURAN ---
         elif data == "adm_yuran":
             conn = get_db_connection()
             cursor = conn.cursor()
@@ -323,7 +330,7 @@ def terima_jumlah_dibayar(message):
             f"• Kena Bayar: RM {yuran:.2f}\n"
             f"• Sudah Bayar: RM {dibayar:.2f}\n"
             f"• Baki: RM {baki:.2f}\n"
-            f"• Status: **{status}**",
+            f"• Status: **$status**",
             reply_markup=markup,
             parse_mode="Markdown"
         )
