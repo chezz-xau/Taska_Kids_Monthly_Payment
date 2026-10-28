@@ -10,27 +10,28 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-# Simpanan sementara untuk proses pendaftaran baru / kemaskini bayaran
 admin_temp_data = {}
 
 def get_db_connection():
     return psycopg2.connect(DATABASE_URL, sslmode="require")
 
-# --- 1. SETUP DATABASE ADMIN ---
+# --- 1. SETUP & MIGRASI DATABASE ADMIN ---
 def init_db():
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
+        # Buat jadual jika belum ada
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS pelajar (
                 id SERIAL PRIMARY KEY,
                 nama TEXT,
                 cawangan TEXT,
-                yuran_kena_bayar NUMERIC DEFAULT 0,
-                jumlah_dibayar NUMERIC DEFAULT 0,
                 status_bayaran TEXT DEFAULT 'Belum Lunas'
             )
         ''')
+        # Pastikan kolum yuran wujud walaupun jadual lama dah ada
+        cursor.execute("ALTER TABLE pelajar ADD COLUMN IF NOT EXISTS yuran_kena_bayar NUMERIC DEFAULT 0;")
+        cursor.execute("ALTER TABLE pelajar ADD COLUMN IF NOT EXISTS jumlah_dibayar NUMERIC DEFAULT 0;")
         conn.commit()
         cursor.close()
         conn.close()
@@ -82,117 +83,129 @@ def menu_utama_admin(chat_id, message_id=None, is_new=False):
         except:
             bot.send_message(chat_id, text, reply_markup=markup, parse_mode="Markdown")
 
-# --- 4. CALLBACK HANDLER UNTUK ADMIN ---
+# --- 4. CALLBACK HANDLER UTAMA DENGAN PELINDUNG RALAT ---
 @bot.callback_query_handler(func=lambda call: True)
 def handle_admin_callbacks(call):
+    chat_id = call.message.chat.id
+    msg_id = call.message.message_id
+    data = call.data
+
     try:
         bot.answer_callback_query(call.id)
     except:
         pass
 
-    chat_id = call.message.chat.id
-    msg_id = call.message.message_id
-    data = call.data
+    try:
+        if data == "back_start":
+            menu_utama_admin(chat_id, msg_id)
 
-    if data == "back_start":
-        menu_utama_admin(chat_id, msg_id)
-
-    # --- PENDAFTARAN BARU ---
-    elif data == "adm_daftar":
-        markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton("🏢 Taska Corner", callback_data="reg_c_Taska Corner"))
-        markup.add(types.InlineKeyboardButton("🏢 Taska Hadhari", callback_data="reg_c_Taska Hadhari"))
-        markup.add(types.InlineKeyboardButton("🔙 Menu Utama", callback_data="back_start"))
-        bot.edit_message_text("➕ Pilih cawangan untuk pendaftaran pelajar baru:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
-
-    elif data.startswith("reg_c_"):
-        cawangan = data.split("_", 2)[2]
-        admin_temp_data[chat_id] = {"cawangan": cawangan}
-        markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("❌ Batal", callback_data="adm_daftar"))
-        bot.edit_message_text(f"📝 Pendaftaran untuk **{cawangan}**.\n\nSila hantar **Nama Penuh Anak**:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
-        bot.register_next_step_handler(call.message, terima_nama_pelajar)
-
-    # --- SENARAI NAMA PELAJAR ---
-    elif data == "adm_senarai":
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, nama, cawangan FROM pelajar ORDER BY cawangan, nama")
-        rows = cursor.fetchall()
-        cursor.close()
-        conn.close()
-
-        markup = types.InlineKeyboardMarkup()
-        if rows:
-            for r in rows:
-                p_id, nama, cawangan = r
-                short_caw = "Corner" if cawangan == "Taska Corner" else "Hadhari"
-                markup.add(types.InlineKeyboardButton(f"👤 {nama} ({short_caw})", callback_data=f"detail_{p_id}"))
-        markup.add(types.InlineKeyboardButton("🔙 Menu Utama", callback_data="back_start"))
-        bot.edit_message_text("📋 **Senarai Nama Pelajar**\nKlik nama pelajar untuk lihat butiran lanjut:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
-
-    elif data.startswith("detail_"):
-        p_id = data.split("_")[1]
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT nama, cawangan, yuran_kena_bayar, jumlah_dibayar, status_bayaran FROM pelajar WHERE id = %s", (p_id,))
-        res = cursor.fetchone()
-        cursor.close()
-        conn.close()
-
-        if res:
-            nama, cawangan, yuran, bayar, status = res
-            baki = float(yuran) - float(bayar)
-            text = (
-                f"👤 **Maklumat Pelajar**\n\n"
-                f"• **Nama:** {nama}\n"
-                f"• **Cawangan:** {cawangan}\n"
-                f"• **Yuran Kena Bayar:** RM {yuran}\n"
-                f"• **Sudah Bayar:** RM {bayar}\n"
-                f"• **Baki:** RM {baki}\n"
-                f"• **Status:** {status}"
-            )
+        # --- PENDAFTARAN BARU ---
+        elif data == "adm_daftar":
             markup = types.InlineKeyboardMarkup()
-            markup.add(types.InlineKeyboardButton("🗑️ Padam Pelajar", callback_data=f"del_{p_id}"))
-            markup.add(types.InlineKeyboardButton("🔙 Senarai Pelajar", callback_data="adm_senarai"))
-            bot.edit_message_text(text, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            markup.add(types.InlineKeyboardButton("🏢 Taska Corner", callback_data="reg_c_Taska Corner"))
+            markup.add(types.InlineKeyboardButton("🏢 Taska Hadhari", callback_data="reg_c_Taska Hadhari"))
+            markup.add(types.InlineKeyboardButton("🔙 Menu Utama", callback_data="back_start"))
+            bot.edit_message_text("➕ Pilih cawangan untuk pendaftaran pelajar baru:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
-    elif data.startswith("del_"):
-        p_id = data.split("_")[1]
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM pelajar WHERE id = %s", (p_id,))
-        conn.commit()
-        cursor.close()
-        conn.close()
-        
-        markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 Senarai Pelajar", callback_data="adm_senarai"))
-        bot.edit_message_text("🗑️ Rekod pelajar telah berjaya dipadam.", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+        elif data.startswith("reg_c_"):
+            cawangan = data.split("_", 2)[2]
+            admin_temp_data[chat_id] = {"cawangan": cawangan}
+            markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("❌ Batal", callback_data="adm_daftar"))
+            bot.edit_message_text(f"📝 Pendaftaran untuk **{cawangan}**.\n\nSila hantar **Nama Penuh Anak**:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            bot.register_next_step_handler(call.message, terima_nama_pelajar)
 
-    # --- SEMAK & KEMASKINI YURAN ---
-    elif data == "adm_yuran":
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, nama, cawangan, status_bayaran FROM pelajar ORDER BY cawangan, nama")
-        rows = cursor.fetchall()
-        cursor.close()
-        conn.close()
+        # --- SENARAI NAMA PELAJAR ---
+        elif data == "adm_senarai":
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, nama, cawangan FROM pelajar ORDER BY cawangan, nama")
+            rows = cursor.fetchall()
+            cursor.close()
+            conn.close()
 
-        markup = types.InlineKeyboardMarkup()
-        if rows:
-            for r in rows:
-                p_id, nama, cawangan, status = r
-                icon = "🟢" if status == "Lunas" else "🔴"
-                short_caw = "Corner" if cawangan == "Taska Corner" else "Hadhari"
-                markup.add(types.InlineKeyboardButton(f"{icon} {nama} ({status})", callback_data=f"pay_{p_id}"))
-        markup.add(types.InlineKeyboardButton("🔙 Menu Utama", callback_data="back_start"))
-        bot.edit_message_text("💰 **Pengurusan Yuran Bulanan**\nPilih pelajar untuk kemaskini bayaran:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            markup = types.InlineKeyboardMarkup()
+            if rows:
+                for r in rows:
+                    p_id, nama, cawangan = r
+                    short_caw = "Corner" if cawangan == "Taska Corner" else "Hadhari"
+                    markup.add(types.InlineKeyboardButton(f"👤 {nama} ({short_caw})", callback_data=f"detail_{p_id}"))
+            else:
+                markup.add(types.InlineKeyboardButton("➕ Daftar Pelajar Baru", callback_data="adm_daftar"))
+            
+            markup.add(types.InlineKeyboardButton("🔙 Menu Utama", callback_data="back_start"))
+            bot.edit_message_text("📋 **Senarai Nama Pelajar**\nKlik nama pelajar untuk lihat butiran lanjut:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
-    elif data.startswith("pay_"):
-        p_id = data.split("_")[1]
-        admin_temp_data[chat_id] = {"edit_id": p_id}
-        markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("❌ Batal", callback_data="adm_yuran"))
-        bot.edit_message_text("💵 Sila hantar **jumlah yuran penuh** (Contoh: `350`):", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
-        bot.register_next_step_handler(call.message, terima_jumlah_yuran)
+        elif data.startswith("detail_"):
+            p_id = data.split("_")[1]
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT nama, cawangan, yuran_kena_bayar, jumlah_dibayar, status_bayaran FROM pelajar WHERE id = %s", (p_id,))
+            res = cursor.fetchone()
+            cursor.close()
+            conn.close()
+
+            if res:
+                nama, cawangan, yuran, bayar, status = res
+                yuran_val = float(yuran) if yuran else 0.0
+                bayar_val = float(bayar) if bayar else 0.0
+                baki = yuran_val - bayar_val
+                
+                text = (
+                    f"👤 **Maklumat Pelajar**\n\n"
+                    f"• **Nama:** {nama}\n"
+                    f"• **Cawangan:** {cawangan}\n"
+                    f"• **Yuran Kena Bayar:** RM {yuran_val:.2f}\n"
+                    f"• **Sudah Bayar:** RM {bayar_val:.2f}\n"
+                    f"• **Baki:** RM {baki:.2f}\n"
+                    f"• **Status:** {status}"
+                )
+                markup = types.InlineKeyboardMarkup()
+                markup.add(types.InlineKeyboardButton("🗑️ Padam Pelajar", callback_data=f"del_{p_id}"))
+                markup.add(types.InlineKeyboardButton("🔙 Senarai Pelajar", callback_data="adm_senarai"))
+                bot.edit_message_text(text, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            else:
+                bot.answer_callback_query(call.id, "⚠️ Maklumat pelajar tidak dijumpai.", show_alert=True)
+
+        elif data.startswith("del_"):
+            p_id = data.split("_")[1]
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM pelajar WHERE id = %s", (p_id,))
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 Senarai Pelajar", callback_data="adm_senarai"))
+            bot.edit_message_text("🗑️ Rekod pelajar telah berjaya dipadam.", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+
+        # --- SEMAK & KEMASKINI YURAN ---
+        elif data == "adm_yuran":
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, nama, cawangan, status_bayaran FROM pelajar ORDER BY cawangan, nama")
+            rows = cursor.fetchall()
+            cursor.close()
+            conn.close()
+
+            markup = types.InlineKeyboardMarkup()
+            if rows:
+                for r in rows:
+                    p_id, nama, cawangan, status = r
+                    icon = "🟢" if status == "Lunas" else "🔴"
+                    short_caw = "Corner" if cawangan == "Taska Corner" else "Hadhari"
+                    markup.add(types.InlineKeyboardButton(f"{icon} {nama} ({status})", callback_data=f"pay_{p_id}"))
+            markup.add(types.InlineKeyboardButton("🔙 Menu Utama", callback_data="back_start"))
+            bot.edit_message_text("💰 **Pengurusan Yuran Bulanan**\nPilih pelajar untuk kemaskini bayaran:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+
+        elif data.startswith("pay_"):
+            p_id = data.split("_")[1]
+            admin_temp_data[chat_id] = {"edit_id": p_id}
+            markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("❌ Batal", callback_data="adm_yuran"))
+            bot.edit_message_text("💵 Sila hantar **jumlah yuran penuh** (Contoh: `350`):", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            bot.register_next_step_handler(call.message, terima_jumlah_yuran)
+
+    except Exception as e:
+        bot.answer_callback_query(call.id, f"Ralat: {str(e)[:50]}", show_alert=True)
 
 # --- 5. NEXT STEP HANDLERS UNTUK INPUT ADMIN ---
 def terima_nama_pelajar(message):
@@ -242,7 +255,7 @@ def terima_yuran_pendaftaran(message):
         conn.close()
 
         markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("👑 Menu Utama", callback_data="back_start"))
-        bot.send_message(chat_id, f"✅ Berjaya mendaftarkan **{nama}** di **{cawangan}** dengan yuran RM {yuran}!", reply_markup=markup, parse_mode="Markdown")
+        bot.send_message(chat_id, f"✅ Berjaya mendaftarkan **{nama}** di **{cawangan}** dengan yuran RM {yuran:.2f}!", reply_markup=markup, parse_mode="Markdown")
     except Exception as e:
         bot.send_message(chat_id, f"❌ Ralat database: {e}")
 
@@ -308,9 +321,9 @@ def terima_jumlah_dibayar(message):
         bot.send_message(
             chat_id,
             f"✅ Maklumat yuran **{nama_pelajar}** dikemaskini!\n\n"
-            f"• Kena Bayar: RM {yuran}\n"
-            f"• Sudah Bayar: RM {dibayar}\n"
-            f"• Baki: RM {baki}\n"
+            f"• Kena Bayar: RM {yuran:.2f}\n"
+            f"• Sudah Bayar: RM {dibayar:.2f}\n"
+            f"• Baki: RM {baki:.2f}\n"
             f"• Status: **{status}**",
             reply_markup=markup,
             parse_mode="Markdown"
