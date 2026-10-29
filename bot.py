@@ -41,18 +41,18 @@ def send_telegram_message(message, chat_id=CHAT_ID):
     print(f"Ralat sambungan Telegram: {e}")
 
 
-def get_market_data():
-  """Mengambil data pasaran (Contoh menggunakan Twelve Data API jika berkaitan)
+def get_market_data(timeframe="1h"):
+  """[PENTING] Gantikan fungsi ini dengan sumber data broker / TwelveData anda
 
   Pastikan DataFrame yang dipulangkan mempunyai kolum:
   ['time', 'open', 'high', 'low', 'close']
   """
-  # Contoh integrasi menggunakan TWELVE_API_KEY jika diperlukan:
-  # url = f"https://api.twelvedata.com/time_series?symbol=XAU/USD&interval=1h&outputsize=50&apikey={TWELVE_API_KEY}"
+  # --- CONTOH TEMPLATE DATA FETCH ---
+  # url = f"https://api.twelvedata.com/time_series?symbol=XAU/USD&interval={timeframe}&outputsize=50&apikey={TWELVE_API_KEY}"
   # response = requests.get(url).json()
   # if "values" in response:
   #     df = pd.DataFrame(response['values'])
-  #     df = df.iloc[::-1].reset_index(drop=True) # susun dari lama ke baru
+  #     df = df.iloc[::-1].reset_index(drop=True)
   #     for col in ['open', 'high', 'low', 'close']:
   #         df[col] = df[col].astype(float)
   #     return df
@@ -98,31 +98,60 @@ def get_valid_bucu(df):
   return last_bucu_high, last_bucu_low
 
 
-# ---------------------------------------------------------
-# 4. FUNGSI ANALISIS TREND SEMASA
-# ---------------------------------------------------------
-def analyze_current_trend():
-  df = get_market_data()
+def evaluate_trend(df):
+  """Menilai status trend berdasarkan dataframe untuk timeframe tertentu"""
   if df is None or len(df) < 5:
-    return "⚠️ Data pasaran tidak mencukupi buat masa ini."
+    return "Data tidak mencukupi", 0, 0, 0
 
   completed_candle = df.iloc[-2]
   close_price = float(completed_candle["close"])
   bucu_high, bucu_low = get_valid_bucu(df)
 
-  # Tentukan status berdasarkan body close terhadap bucu sah
   trend_status = "🟡 SIDEWAYS (Dalam Range)"
+
   if bucu_low is not None and close_price < bucu_low:
-    trend_status = "🔴 BEARISH (TURUN - Breakout Support)"
+    trend_status = "🔴 BEARISH (Breakout Support)"
   elif bucu_high is not None and close_price > bucu_high:
-    trend_status = "🟢 BULLISH (NAIK - Breakout Resistance)"
+    trend_status = "🟢 BULLISH (Breakout Resistance)"
+  else:
+    # Semak sama ada baru lepas buat penurunan/kenaikan (elak jadi sideways serta-merta masa retrace)
+    recent_closes = df["close"].iloc[-5:-1].values
+    if bucu_low is not None and any(c < bucu_low for c in recent_closes):
+      trend_status = "🔴 BEARISH (Rekod Turun - Sedang Retrace)"
+    elif bucu_high is not None and any(c > bucu_high for c in recent_closes):
+      trend_status = "🟢 BULLISH (Rekod Naik - Sedang Pullback)"
+
+  return (
+      trend_status,
+      close_price,
+      bucu_high if bucu_high else 0,
+      bucu_low if bucu_low else 0,
+  )
+
+
+# ---------------------------------------------------------
+# 4. FUNGSI ANALISIS GABUNGAN H1 & M30 UNTUK /trend
+# ---------------------------------------------------------
+def analyze_current_trend():
+  # Tarik data berasingan untuk H1 dan M30
+  df_h1 = get_market_data(timeframe="1h")
+  df_m30 = get_market_data(timeframe="30min")
+
+  h1_status, h1_close, h1_high, h1_low = evaluate_trend(df_h1)
+  m30_status, m30_close, m30_high, m30_low = evaluate_trend(df_m30)
 
   msg = (
       f"📊 *ANALISIS STRUKTUR BUCU (BODY CLOSE)*\n\n"
-      f"• **Trend Semasa:** {trend_status}\n"
-      f"• **Close Terkini:** `${close_price:.2f}`\n"
-      f"• **Bucu Body High:** `${bucu_high if bucu_high else 0:.2f}`\n"
-      f"• **Bucu Body Low:** `${bucu_low if bucu_low else 0:.2f}`"
+      f"⏰ *Analisis H1 (Major):*\n"
+      f"• Trend H1: {h1_status}\n"
+      f"• Close H1: `${h1_close:.2f}`\n"
+      f"• Bucu Body High H1: `${h1_high:.2f}`\n"
+      f"• Bucu Body Low H1: `${h1_low:.2f}`\n\n"
+      f"📉 *Analisis M30 (Minor):*\n"
+      f"• Trend M30: {m30_status}\n"
+      f"• Close M30: `${m30_close:.2f}`\n"
+      f"• Bucu Body High M30: `${m30_high:.2f}`\n"
+      f"• Bucu Body Low M30: `${m30_low:.2f}`"
   )
   return msg
 
@@ -150,53 +179,32 @@ def telegram_webhook():
 # ---------------------------------------------------------
 def run_bot():
   print("🤖 Bot Breakout Syezz dimulakan...")
-  last_processed_time = None
+  last_processed_time_m30 = None
 
   while True:
     try:
-      df = get_market_data()
+      df_m30 = get_market_data(timeframe="30min")
 
-      if df is not None and len(df) >= 5:
-        completed_candle = df.iloc[-2]
+      if df_m30 is not None and len(df_m30) >= 5:
+        completed_candle = df_m30.iloc[-2]
         current_candle_time = str(completed_candle["time"])
         close_price = float(completed_candle["close"])
+        _, bucu_low = get_valid_bucu(df_m30)
 
-        bucu_high, bucu_low = get_valid_bucu(df)
-
-        # Semak jika ini candle baharu yang baru selesai tutup
-        if current_candle_time != last_processed_time:
-
-          # Amaran Breakout Sell (Bearish)
+        if current_candle_time != last_processed_time_m30:
           if bucu_low is not None and close_price < bucu_low:
             msg = (
-                f"🚨 *ALERT BREAKOUT BEARISH (BODY CLOSE)*! 🔴\n\n"
-                f"Candle baharu sahaja *CLOSE* di bawah support!\n"
+                f"🚨 *ALERT BREAKOUT BEARISH M30*! 🔴\n\n"
                 f"• Close Harga: `${close_price:.2f}`\n"
-                f"• Bucu Body Low Tembus: `${bucu_low:.2f}`\n\n"
-                f"_Struktur sah bertukar kepada Downtrend / Bearish!_"
+                f"• Bucu Body Low Tembus: `${bucu_low:.2f}`"
             )
             send_telegram_message(msg)
-            last_processed_time = current_candle_time
-            print(f"[{datetime.now()}] Alert Breakout Sell berjaya dihantar!")
+            last_processed_time_m30 = current_candle_time
 
-          # Amaran Breakout Buy (Bullish)
-          elif bucu_high is not None and close_price > bucu_high:
-            msg = (
-                f"🚨 *ALERT BREAKOUT BULLISH (BODY CLOSE)*! 🟢\n\n"
-                f"Candle baharu sahaja *CLOSE* di atas resistance!\n"
-                f"• Close Harga: `${close_price:.2f}`\n"
-                f"• Bucu Body High Tembus: `${bucu_high:.2f}`\n\n"
-                f"_Struktur sah bertukar kepada Uptrend / Bullish!_"
-            )
-            send_telegram_message(msg)
-            last_processed_time = current_candle_time
-            print(f"[{datetime.now()}] Alert Breakout Buy berjaya dihantar!")
-
-      # Semak setiap 30 saat
       time.sleep(30)
 
     except Exception as e:
-      print(f"Ralat berlaku dalam gelung utama bot: {e}")
+      print(f"Ralat gelung utama bot: {e}")
       time.sleep(30)
 
 
@@ -204,11 +212,9 @@ def run_bot():
 # 7. EXECUTION UTAMA (FLASK + THREADING)
 # ---------------------------------------------------------
 if __name__ == "__main__":
-  # Jalankan bot di background thread
   bot_thread = threading.Thread(target=run_bot)
   bot_thread.daemon = True
   bot_thread.start()
 
-  # Jalankan server Flask pada port Render
   port = int(os.environ.get("PORT", 5000))
   app.run(host="0.0.0.0", port=port)
