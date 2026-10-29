@@ -42,21 +42,30 @@ def send_telegram_message(message, chat_id=CHAT_ID):
 
 
 def get_market_data(timeframe="1h"):
-  """[PENTING] Gantikan fungsi ini dengan sumber data broker / TwelveData anda
+  """Mengambil data pasaran secara live daripada Twelve Data API"""
+  tf_mapping = {"1h": "1h", "30min": "30min"}
+  tf = tf_mapping.get(timeframe, "1h")
 
-  Pastikan DataFrame yang dipulangkan mempunyai kolum:
-  ['time', 'open', 'high', 'low', 'close']
-  """
-  # --- CONTOH TEMPLATE DATA FETCH ---
-  # url = f"https://api.twelvedata.com/time_series?symbol=XAU/USD&interval={timeframe}&outputsize=50&apikey={TWELVE_API_KEY}"
-  # response = requests.get(url).json()
-  # if "values" in response:
-  #     df = pd.DataFrame(response['values'])
-  #     df = df.iloc[::-1].reset_index(drop=True)
-  #     for col in ['open', 'high', 'low', 'close']:
-  #         df[col] = df[col].astype(float)
-  #     return df
-  pass
+  # Menggunakan simbol XAU/USD pada Twelve Data API
+  url = f"https://api.twelvedata.com/time_series?symbol=XAU/USD&interval={tf}&outputsize=50&apikey={TWELVE_API_KEY}"
+
+  try:
+    response = requests.get(url, timeout=10)
+    data = response.json()
+
+    if "values" in data:
+      df = pd.DataFrame(data["values"])
+      # Susun semula dari candle lama ke candle baharu
+      df = df.iloc[::-1].reset_index(drop=True)
+      for col in ["open", "high", "low", "close"]:
+        df[col] = df[col].astype(float)
+      return df
+    else:
+      print(f"Ralat API TwelveData ({timeframe}): {data}")
+      return None
+  except Exception as e:
+    print(f"Ralat sambungan ke API: {e}")
+    return None
 
 
 # ---------------------------------------------------------
@@ -114,7 +123,6 @@ def evaluate_trend(df):
   elif bucu_high is not None and close_price > bucu_high:
     trend_status = "🟢 BULLISH (Breakout Resistance)"
   else:
-    # Semak sama ada baru lepas buat penurunan/kenaikan (elak jadi sideways serta-merta masa retrace)
     recent_closes = df["close"].iloc[-5:-1].values
     if bucu_low is not None and any(c < bucu_low for c in recent_closes):
       trend_status = "🔴 BEARISH (Rekod Turun - Sedang Retrace)"
@@ -133,7 +141,6 @@ def evaluate_trend(df):
 # 4. FUNGSI ANALISIS GABUNGAN H1 & M30 UNTUK /trend
 # ---------------------------------------------------------
 def analyze_current_trend():
-  # Tarik data berasingan untuk H1 dan M30
   df_h1 = get_market_data(timeframe="1h")
   df_m30 = get_market_data(timeframe="30min")
 
