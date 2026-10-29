@@ -46,8 +46,7 @@ def get_market_data(timeframe="1h"):
   tf_mapping = {"1h": "1h", "30min": "30min"}
   tf = tf_mapping.get(timeframe, "1h")
 
-  # Menggunakan simbol XAU/USD pada Twelve Data API
-  url = f"https://api.twelvedata.com/time_series?symbol=XAU/USD&interval={tf}&outputsize=50&apikey={TWELVE_API_KEY}"
+  url = f"https://api.twelvedata.com/time_series?symbol=XAU/USD&interval={tf}&outputsize=100&apikey={TWELVE_API_KEY}"
 
   try:
     response = requests.get(url, timeout=10)
@@ -55,7 +54,6 @@ def get_market_data(timeframe="1h"):
 
     if "values" in data:
       df = pd.DataFrame(data["values"])
-      # Susun semula dari candle lama ke candle baharu
       df = df.iloc[::-1].reset_index(drop=True)
       for col in ["open", "high", "low", "close"]:
         df[col] = df[col].astype(float)
@@ -69,7 +67,7 @@ def get_market_data(timeframe="1h"):
 
 
 # ---------------------------------------------------------
-# 3. LOGIK PENCARIAN BUCU SAH (ELAK REPAINTING)
+# 3. LOGIK PENCARIAN BUCU SAH (FRACTAL BODY)
 # ---------------------------------------------------------
 def get_valid_bucu(df):
   """Mencari aras Bucu High & Low yang sah (Fractal Body)."""
@@ -83,7 +81,6 @@ def get_valid_bucu(df):
   valid_bucu_lows = []
   valid_bucu_highs = []
 
-  # Imbas data (abaikan 2 candle terakhir yang belum lengkap struktur swing)
   for i in range(2, len(df) - 2):
     if (
         df["body_low"].iloc[i] < df["body_low"].iloc[i - 1]
@@ -101,60 +98,68 @@ def get_valid_bucu(df):
     ):
       valid_bucu_highs.append(df["body_high"].iloc[i])
 
-  last_bucu_low = valid_bucu_lows[-1] if valid_bucu_lows else None
+    last_bucu_low = valid_bucu_lows[-1] if valid_bucu_lows else None
   last_bucu_high = valid_bucu_highs[-1] if valid_bucu_highs else None
 
   return last_bucu_high, last_bucu_low
 
 
-def evaluate_trend(df):
-  """Menilai status trend berdasarkan dataframe untuk timeframe tertentu"""
-  if df is None or len(df) < 5:
-    return "Data tidak mencukupi", 0, 0, 0
+# ---------------------------------------------------------
+# 4. LOGIK MAJOR TREND (MENGIKUT STRUKTUR BESAR)
+# ---------------------------------------------------------
+def evaluate_major_trend(df):
+  """Menilai trend major berdasarkan arah pecah aras struktur body close terakhir"""
+  if df is None or len(df) < 10:
+    return "🟡 SIDEWAYS (Data tidak cukup)", 0, 0, 0
+
+  df = df.copy()
+  df["body_low"] = df[["open", "close"]].min(axis=1)
+  df["body_high"] = df[["open", "close"]].max(axis=1)
+
+  # Semak trend major berdasarkan pergerakan struktur bucu terkini
+  major_trend = "🟡 SIDEWAYS (Dalam Range)"
+  active_bucu_high, active_bucu_low = get_valid_bucu(df)
 
   completed_candle = df.iloc[-2]
   close_price = float(completed_candle["close"])
-  bucu_high, bucu_low = get_valid_bucu(df)
 
-  trend_status = "🟡 SIDEWAYS (Dalam Range)"
+  # Imbas arah breakout terakhir dari struktur major
+  for i in range(10, len(df) - 1):
+    sub_df = df.iloc[:i]
+    bh, bl = get_valid_bucu(sub_df)
+    c_close = df["close"].iloc[i]
 
-  if bucu_low is not None and close_price < bucu_low:
-    trend_status = "🔴 BEARISH (Breakout Support)"
-  elif bucu_high is not None and close_price > bucu_high:
-    trend_status = "🟢 BULLISH (Breakout Resistance)"
-  else:
-    recent_closes = df["close"].iloc[-5:-1].values
-    if bucu_low is not None and any(c < bucu_low for c in recent_closes):
-      trend_status = "🔴 BEARISH (Rekod Turun - Sedang Retrace)"
-    elif bucu_high is not None and any(c > bucu_high for c in recent_closes):
-      trend_status = "🟢 BULLISH (Rekod Naik - Sedang Pullback)"
+    if bl is not None and c_close < bl:
+      major_trend = "🔴 BEARISH (Major Downtrend / Selepas Break Support)"
+    elif bh is not None and c_close > bh:
+      major_trend = "🟢 BULLISH (Major Uptrend / Selepas Break Resistance)"
 
   return (
-      trend_status,
+      major_trend,
       close_price,
-      bucu_high if bucu_high else 0,
-      bucu_low if bucu_low else 0,
+      active_bucu_high if active_bucu_high else 0,
+      active_bucu_low if active_bucu_low else 0,
   )
 
 
 # ---------------------------------------------------------
-# 4. FUNGSI ANALISIS GABUNGAN H1 & M30 UNTUK /trend
+# 5. FUNGSI ANALISIS GABUNGAN H1 & M30 UNTUK /trend
 # ---------------------------------------------------------
 def analyze_current_trend():
   df_h1 = get_market_data(timeframe="1h")
   df_m30 = get_market_data(timeframe="30min")
 
-  h1_status, h1_close, h1_high, h1_low = evaluate_trend(df_h1)
-  m30_status, m30_close, m30_high, m30_low = evaluate_trend(df_m30)
+  h1_status, h1_close, h1_high, h1_low = evaluate_major_trend(df_h1)
+  m30_status, m30_close, m30_high, m30_low = evaluate_major_trend(df_m30)
 
   msg = (
-      f"📊 *ANALISIS STRUKTUR BUCU (BODY CLOSE)*\n\n"
-      f"⏰ *Analisis H1 (Major):*\n"
+      f"📊 *ANALISIS STRUKTUR MAJOR TREND (BODY CLOSE)*\n\n"
+      f"⏰ *Analisis H1 (Major Trend):*\n"
       f"• Trend H1: {h1_status}\n"
       f"• Close H1: `${h1_close:.2f}`\n"
       f"• Bucu Body High H1: `${h1_high:.2f}`\n"
       f"• Bucu Body Low H1: `${h1_low:.2f}`\n\n"
-      f"📉 *Analisis M30 (Minor):*\n"
+      f"📉 *Analisis M30 (Minor Trend):*\n"
       f"• Trend M30: {m30_status}\n"
       f"• Close M30: `${m30_close:.2f}`\n"
       f"• Bucu Body High M30: `${m30_high:.2f}`\n"
@@ -164,7 +169,7 @@ def analyze_current_trend():
 
 
 # ---------------------------------------------------------
-# 5. TELEGRAM WEBHOOK ROUTE (UNTUK TERIMA ARAHAN /trend)
+# 6. TELEGRAM WEBHOOK ROUTE (UNTUK TERIMA ARAHAN /trend)
 # ---------------------------------------------------------
 @app.route(f"/{TOKEN}", methods=["POST"])
 def telegram_webhook():
@@ -182,7 +187,7 @@ def telegram_webhook():
 
 
 # ---------------------------------------------------------
-# 6. GELUNG UTAMA BOT (BACKGROUND PROCESS UNTUK ALERT)
+# 7. GELUNG UTAMA BOT (BACKGROUND PROCESS UNTUK ALERT)
 # ---------------------------------------------------------
 def run_bot():
   print("🤖 Bot Breakout Syezz dimulakan...")
@@ -192,7 +197,7 @@ def run_bot():
     try:
       df_m30 = get_market_data(timeframe="30min")
 
-      if df_m30 is not None and len(df_m30) >= 5:
+      if df_m30 is not None and len(df_m30) >= 10:
         completed_candle = df_m30.iloc[-2]
         current_candle_time = str(completed_candle["time"])
         close_price = float(completed_candle["close"])
@@ -216,7 +221,7 @@ def run_bot():
 
 
 # ---------------------------------------------------------
-# 7. EXECUTION UTAMA (FLASK + THREADING)
+# 8. EXECUTION UTAMA (FLASK + THREADING)
 # ---------------------------------------------------------
 if __name__ == "__main__":
   bot_thread = threading.Thread(target=run_bot)
