@@ -1,263 +1,363 @@
-from datetime import datetime
 import os
-import threading
-import time
+import psycopg2
+import telebot
+from telebot import types
 from flask import Flask, request
-import pandas as pd
-import requests
 
-# ---------------------------------------------------------
-# 1. SETUP FLASK (Supaya Render kesan port yang sah)
-# ---------------------------------------------------------
+TOKEN = os.environ.get("TELEGRAM_TOKEN")
+DATABASE_URL = os.environ.get("DATABASE_URL")
+
+bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
+admin_temp_data = {}
+
+def get_db_connection():
+    return psycopg2.connect(DATABASE_URL, sslmode="require")
+
+# --- 1. SETUP & MIGRASI DATABASE ADMIN ---
+def init_db():
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS pelajar (
+                id SERIAL PRIMARY KEY,
+                nama TEXT,
+                cawangan TEXT,
+                status_bayaran TEXT DEFAULT 'Belum Lunas'
+            )
+        ''')
+        cursor.execute("ALTER TABLE pelajar ADD COLUMN IF NOT EXISTS yuran_kena_bayar NUMERIC DEFAULT 0;")
+        cursor.execute("ALTER TABLE pelajar ADD COLUMN IF NOT EXISTS jumlah_dibayar NUMERIC DEFAULT 0;")
+        cursor.execute("ALTER TABLE pelajar ADD COLUMN IF NOT EXISTS bulan_bayaran TEXT DEFAULT '-';")
+        conn.commit()
+        cursor.close()
+        conn.close()
+    except Exception as e:
+        print(f"DB Error: {e}")
+
+init_db()
+
+# --- 2. WEBHOOK & RENDER CONFIG ---
+@app.route(f"/{TOKEN}", methods=["POST"])
+def webhook():
+    if request.headers.get("content-type") == "application/json":
+        json_string = request.get_data().decode("utf-8")
+        update = telebot.types.Update.de_json(json_string)
+        bot.process_new_updates([update])
+        return "", 200
+    else:
+        return "Unauthorized", 403
 
 @app.route("/")
-def home():
-  return "Bot M30/H1 Breakout Syezz sedang aktif!"
+def index():
+    return "Bot Admin Taska sedang aktif!"
 
-
-# ---------------------------------------------------------
-# 2. KONFIGURASI TELEGRAM & API (Mengikut Environment Variables Render)
-# ---------------------------------------------------------
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-TWELVE_API_KEY = os.getenv("TWELVE_DATA_API")
-
-
-def send_telegram_message(message, chat_id=CHAT_ID):
-  """Fungsi untuk menghantar mesej amaran ke Telegram"""
-  if not TOKEN or not chat_id:
-    print("Ralat: Token Telegram atau Chat ID tidak ditemui dalam env.")
-    return
-
-  url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-  payload = {"chat_id": chat_id, "text": message, "parse_mode": "Markdown"}
-  try:
-    response = requests.post(url, json=payload, timeout=10)
-    if response.status_code != 200:
-      print(f"Gagal hantar Telegram: {response.text}")
-  except Exception as e:
-    print(f"Ralat sambungan Telegram: {e}")
-
-
-def get_market_data(timeframe="1h"):
-  """Mengambil data pasaran secara live daripada Twelve Data API"""
-  tf_mapping = {"1h": "1h", "30min": "30min"}
-  tf = tf_mapping.get(timeframe, "1h")
-
-  url = f"https://api.twelvedata.com/time_series?symbol=XAU/USD&interval={tf}&outputsize=100&apikey={TWELVE_API_KEY}"
-
-  try:
-    response = requests.get(url, timeout=10)
-    data = response.json()
-
-    if "values" in data:
-      df = pd.DataFrame(data["values"])
-      df = df.iloc[::-1].reset_index(drop=True)
-      for col in ["open", "high", "low", "close"]:
-        df[col] = df[col].astype(float)
-      return df
-    else:
-      print(f"Ralat API TwelveData ({timeframe}): {data}")
-      return None
-  except Exception as e:
-    print(f"Ralat sambungan ke API: {e}")
-    return None
-
-
-# ---------------------------------------------------------
-# 3. LOGIK PENCARIAN BUCU SAH (FRACTAL BODY)
-# ---------------------------------------------------------
-def get_valid_bucu(df):
-  """Mencari aras Bucu High & Low yang sah (Fractal Body)."""
-  if df is None or len(df) < 5:
-    return None, None
-
-  df = df.copy()
-  df["body_low"] = df[["open", "close"]].min(axis=1)
-  df["body_high"] = df[["open", "close"]].max(axis=1)
-
-  valid_bucu_lows = []
-  valid_bucu_highs = []
-
-  for i in range(2, len(df) - 2):
-    if (
-        df["body_low"].iloc[i] < df["body_low"].iloc[i - 1]
-        and df["body_low"].iloc[i] < df["body_low"].iloc[i - 2]
-        and df["body_low"].iloc[i] < df["body_low"].iloc[i + 1]
-        and df["body_low"].iloc[i] < df["body_low"].iloc[i + 2]
-    ):
-      valid_bucu_lows.append(df["body_low"].iloc[i])
-
-    if (
-        df["body_high"].iloc[i] > df["body_high"].iloc[i - 1]
-        and df["body_high"].iloc[i] > df["body_high"].iloc[i - 2]
-        and df["body_high"].iloc[i] > df["body_high"].iloc[i + 1]
-        and df["body_high"].iloc[i] > df["body_high"].iloc[i + 2]
-    ):
-      valid_bucu_highs.append(df["body_high"].iloc[i])
-
-  last_bucu_low = valid_bucu_lows[-1] if valid_bucu_lows else None
-  last_bucu_high = valid_bucu_highs[-1] if valid_bucu_highs else None
-
-  return last_bucu_high, last_bucu_low
-
-
-# ---------------------------------------------------------
-# 4. LOGIK MAJOR TREND (MENGIKUT STRUKTUR BESAR)
-# ---------------------------------------------------------
-def evaluate_major_trend(df):
-  """Menilai trend major dengan mengunci status arah breakout terakhir"""
-  if df is None or len(df) < 10:
-    return "🟡 SIDEWAYS (Data tidak cukup)", 0, 0, 0
-
-  df = df.copy()
-  df["body_low"] = df[["open", "close"]].min(axis=1)
-  df["body_high"] = df[["open", "close"]].max(axis=1)
-
-  completed_candle = df.iloc[-2]
-  close_price = float(completed_candle["close"])
-  active_bucu_high, active_bucu_low = get_valid_bucu(df)
-
-  major_trend = "🟡 SIDEWAYS (Dalam Range)"
-
-  if active_bucu_low is not None and close_price < active_bucu_low:
-    major_trend = "🔴 BEARISH (Breakout Support - Downtrend Major)"
-  elif active_bucu_high is not None and close_price > active_bucu_high:
-    major_trend = "🟢 BULLISH (Breakout Resistance - Uptrend Major)"
-  else:
-    detected_trend = "🟡 SIDEWAYS (Dalam Range)"
-    curr_bh, curr_bl = None, None
-
-    for i in range(5, len(df) - 1):
-      sub_df = df.iloc[:i]
-      bh, bl = get_valid_bucu(sub_df)
-      if bh is not None:
-        curr_bh = bh
-      if bl is not None:
-        curr_bl = bl
-
-      c_close = df["close"].iloc[i]
-      if curr_bl is not None and c_close < curr_bl:
-        detected_trend = "🔴 BEARISH (Downtrend Major / Retrace Zone)"
-      elif curr_bh is not None and c_close > curr_bh:
-        detected_trend = "🟢 BULLISH (Uptrend Major / Pullback Zone)"
-
-    major_trend = detected_trend
-
-  return (
-      major_trend,
-      close_price,
-      active_bucu_high if active_bucu_high else 0,
-      active_bucu_low if active_bucu_low else 0,
-  )
-
-
-# ---------------------------------------------------------
-# 5. FUNGSI ANALISIS GABUNGAN H1 & M30 UNTUK /trend
-# ---------------------------------------------------------
-def analyze_current_trend():
-  df_h1 = get_market_data(timeframe="1h")
-  df_m30 = get_market_data(timeframe="30min")
-
-  h1_status, h1_close, h1_high, h1_low = evaluate_major_trend(df_h1)
-  m30_status, m30_close, m30_high, m30_low = evaluate_major_trend(df_m30)
-
-  msg = (
-      f"📊 *ANALISIS STRUKTUR MAJOR TREND (BODY CLOSE)*\n\n"
-      f"⏰ *Analisis H1 (Major Trend):*\n"
-      f"• Trend H1: {h1_status}\n"
-      f"• Close H1: `${h1_close:.2f}`\n"
-      f"• Bucu Body High H1: `${h1_high:.2f}`\n"
-      f"• Bucu Body Low H1: `${h1_low:.2f}`\n\n"
-      f"📉 *Analisis M30 (Minor Trend):*\n"
-      f"• Trend M30: {m30_status}\n"
-      f"• Close M30: `${m30_close:.2f}`\n"
-      f"• Bucu Body High M30: `${m30_high:.2f}`\n"
-      f"• Bucu Body Low M30: `${m30_low:.2f}`"
-  )
-  return msg
-
-
-# ---------------------------------------------------------
-# 6. TELEGRAM WEBHOOK ROUTE (UNTUK TERIMA ARAHAN /trend)
-# ---------------------------------------------------------
-@app.route(f"/{TOKEN}", methods=["POST"])
-def telegram_webhook():
-  data = request.get_json()
-  if "message" in data:
-    message = data["message"]
-    chat_id = message["chat"]["id"]
-    text = message.get("text", "")
-
-    if text.startswith("/trend"):
-      response_text = analyze_current_trend()
-      send_telegram_message(response_text, chat_id=chat_id)
-
-  return "OK", 200
-
-
-# ---------------------------------------------------------
-# 7. GELUNG UTAMA BOT (AUTO ALERT M30 BUY & SELL)
-# ---------------------------------------------------------
-def run_bot():
-  print("🤖 Bot Breakout Syezz dimulakan (Auto Alert M30 Buy/Sell)...")
-  last_processed_time_m30 = None
-
-  while True:
+render_url = os.environ.get("RENDER_EXTERNAL_URL")
+if render_url:
     try:
-      df_m30 = get_market_data(timeframe="30min")
+        bot.remove_webhook()
+        bot.set_webhook(url=f"{render_url}/{TOKEN}")
+    except Exception as e:
+        print(f"Webhook Error: {e}")
 
-      if df_m30 is not None and len(df_m30) >= 10:
-        completed_candle = df_m30.iloc[-2]
-        current_candle_time = str(completed_candle["time"])
-        close_price = float(completed_candle["close"])
-        bucu_high, bucu_low = get_valid_bucu(df_m30)
+# --- 3. MENU UTAMA ADMIN ---
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
+    remove_markup = types.ReplyKeyboardRemove()
+    temp_msg = bot.send_message(message.chat.id, "🔄 Memuatkan menu utama...", reply_markup=remove_markup)
+    try:
+        bot.delete_message(message.chat.id, temp_msg.message_id)
+    except:
+        pass
+        
+    menu_utama_admin(message.chat.id, is_new=True)
 
-        # Semak jika ada candle M30 baharu yang baru selesai tutup
-        if current_candle_time != last_processed_time_m30:
+def menu_utama_admin(chat_id, message_id=None, is_new=False):
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("➕ Pendaftaran Pelajar Baru", callback_data="adm_daftar"))
+    markup.add(types.InlineKeyboardButton("📋 Senarai Nama & Status Pelajar", callback_data="adm_senarai"))
+    markup.add(types.InlineKeyboardButton("💰 Semak Status & Rekod Bayaran", callback_data="adm_yuran"))
+    
+    text = "👑 **Menu Utama Admin Taska**\nSila pilih fungsi pengurusan di bawah:"
+    if is_new:
+        bot.send_message(chat_id, text, reply_markup=markup, parse_mode="Markdown")
+    else:
+        try:
+            bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode="Markdown")
+        except:
+            bot.send_message(chat_id, text, reply_markup=markup, parse_mode="Markdown")
 
-          # 1. Alert Breakout Sell / Bearish
-          if bucu_low is not None and close_price < bucu_low:
-            msg = (
-                f"🚨 *ALERT BREAKOUT BEARISH M30*! 🔴\n\n"
-                f"Candle M30 baharu sahaja *CLOSE* di bawah support!\n"
-                f"• Close Harga: `${close_price:.2f}`\n"
-                f"• Bucu Body Low Tembus: `${bucu_low:.2f}`\n\n"
-                f"_Struktur M30 sah bertukar kepada Downtrend!_"
-            )
-            send_telegram_message(msg)
-            last_processed_time_m30 = current_candle_time
-            print(f"[{datetime.now()}] Alert M30 Bearish dihantar!")
+# --- 4. CALLBACK HANDLER UTAMA ---
+@bot.callback_query_handler(func=lambda call: True)
+def handle_admin_callbacks(call):
+    chat_id = call.message.chat.id
+    msg_id = call.message.message_id
+    data = call.data
 
-          # 2. Alert Breakout Buy / Bullish
-          elif bucu_high is not None and close_price > bucu_high:
-            msg = (
-                f"🚨 *ALERT BREAKOUT BULLISH M30*! 🟢\n\n"
-                f"Candle M30 baharu sahaja *CLOSE* di atas resistance!\n"
-                f"• Close Harga: `${close_price:.2f}`\n"
-                f"• Bucu Body High Tembus: `${bucu_high:.2f}`\n\n"
-                f"_Struktur M30 sah bertukar kepada Uptrend!_"
-            )
-            send_telegram_message(msg)
-            last_processed_time_m30 = current_candle_time
-            print(f"[{datetime.now()}] Alert M30 Bullish dihantar!")
+    try:
+        bot.answer_callback_query(call.id)
+    except:
+        pass
 
-      time.sleep(30)
+    try:
+        if data == "back_start":
+            menu_utama_admin(chat_id, msg_id)
+
+        # --- PENDAFTARAN BARU ---
+        elif data == "adm_daftar":
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🏢 Taska Corner", callback_data="reg_c_Taska Corner"))
+            markup.add(types.InlineKeyboardButton("🏢 Taska Hadhari", callback_data="reg_c_Taska Hadhari"))
+            markup.add(types.InlineKeyboardButton("🔙 Menu Utama", callback_data="back_start"))
+            bot.edit_message_text("➕ Pilih cawangan untuk pendaftaran pelajar baru:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+
+        elif data.startswith("reg_c_"):
+            cawangan = data.split("_", 2)[2]
+            admin_temp_data[chat_id] = {"cawangan": cawangan}
+            markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("❌ Batal", callback_data="adm_daftar"))
+            bot.edit_message_text(f"📝 Pendaftaran untuk **{cawangan}**.\n\nSila hantar **Nama Penuh Anak**:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            bot.register_next_step_handler(call.message, terima_nama_pelajar)
+
+        # --- SENARAI NAMA PELAJAR ---
+        elif data == "adm_senarai":
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, nama, cawangan FROM pelajar ORDER BY nama ASC")
+            rows = cursor.fetchall()
+            cursor.close()
+            conn.close()
+
+            markup = types.InlineKeyboardMarkup()
+            if rows:
+                for index, r in enumerate(rows, start=1):
+                    p_id, nama, cawangan = r
+                    short_caw = "Corner" if cawangan == "Taska Corner" else "Hadhari"
+                    markup.add(types.InlineKeyboardButton(f"{index}. {nama} ({short_caw})", callback_data=f"detail_{p_id}"))
+            else:
+                markup.add(types.InlineKeyboardButton("➕ Daftar Pelajar Baru", callback_data="adm_daftar"))
+            
+            markup.add(types.InlineKeyboardButton("🔙 Menu Utama", callback_data="back_start"))
+            bot.edit_message_text("📋 **Senarai Nama Pelajar (Disusun A-Z)**\nKlik nama pelajar untuk lihat butiran lanjut:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+
+        elif data.startswith("detail_"):
+            p_id = data.split("_")[1]
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT nama, cawangan, yuran_kena_bayar, jumlah_dibayar, status_bayaran, bulan_bayaran FROM pelajar WHERE id = %s", (p_id,))
+            res = cursor.fetchone()
+            cursor.close()
+            conn.close()
+
+            if res:
+                nama, cawangan, yuran, bayar, status, bulan = res
+                yuran_val = float(yuran) if yuran else 0.0
+                bayar_val = float(bayar) if bayar else 0.0
+                baki = yuran_val - bayar_val
+                bulan_info = bulan if bulan else "-"
+                
+                text = (
+                    f"👤 **Maklumat Pelajar**\n\n"
+                    f"• **Nama:** {nama}\n"
+                    f"• **Cawangan:** {cawangan}\n"
+                    f"• **Bulan Bayaran:** {bulan_info}\n"
+                    f"• **Yuran Kena Bayar:** RM {yuran_val:.2f}\n"
+                    f"• **Sudah Bayar:** RM {bayar_val:.2f}\n"
+                    f"• **Baki:** RM {baki:.2f}\n"
+                    f"• **Status:** {status}"
+                )
+                markup = types.InlineKeyboardMarkup()
+                markup.add(types.InlineKeyboardButton("🗑️ Padam Pelajar", callback_data=f"del_{p_id}"))
+                markup.add(types.InlineKeyboardButton("🔙 Senarai Pelajar", callback_data="adm_senarai"))
+                bot.edit_message_text(text, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            else:
+                bot.answer_callback_query(call.id, "⚠️ Maklumat pelajar tidak dijumpai.", show_alert=True)
+
+        elif data.startswith("del_"):
+            p_id = data.split("_")[1]
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM pelajar WHERE id = %s", (p_id,))
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 Senarai Pelajar", callback_data="adm_senarai"))
+            bot.edit_message_text("🗑️ Rekod pelajar telah berjaya dipadam.", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+
+        # --- SEMAK & KEMASKINI YURAN ---
+        elif data == "adm_yuran":
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, nama, cawangan, status_bayaran FROM pelajar ORDER BY nama ASC")
+            rows = cursor.fetchall()
+            cursor.close()
+            conn.close()
+
+            markup = types.InlineKeyboardMarkup()
+            if rows:
+                for index, r in enumerate(rows, start=1):
+                    p_id, nama, cawangan, status = r
+                    icon = "🟢" if status == "Lunas" else "🔴"
+                    short_caw = "Corner" if cawangan == "Taska Corner" else "Hadhari"
+                    markup.add(types.InlineKeyboardButton(f"{index}. {icon} {nama} ({status})", callback_data=f"pay_{p_id}"))
+            markup.add(types.InlineKeyboardButton("🔙 Menu Utama", callback_data="back_start"))
+            bot.edit_message_text("💰 **Pengurusan Yuran Bulanan (Disusun A-Z)**\nPilih pelajar untuk kemaskini bayaran:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+
+        elif data.startswith("pay_"):
+            p_id = data.split("_")[1]
+            admin_temp_data[chat_id] = {"edit_id": p_id}
+            markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("❌ Batal", callback_data="adm_yuran"))
+            bot.edit_message_text("📅 Sila hantar **Bulan dan Tahun Bayaran**\n(Contoh: `November 2026`):", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            bot.register_next_step_handler(call.message, terima_bulan_bayaran)
 
     except Exception as e:
-      print(f"Ralat gelung utama bot: {e}")
-      time.sleep(30)
+        bot.answer_callback_query(call.id, f"Ralat: {str(e)[:50]}", show_alert=True)
 
+# --- 5. NEXT STEP HANDLERS UNTUK INPUT ADMIN ---
+def terima_nama_pelajar(message):
+    if message.text and message.text.startswith("/"):
+        return
+    chat_id = message.chat.id
+    nama = message.text.strip() if message.text else ""
+    
+    if chat_id not in admin_temp_data:
+        bot.send_message(chat_id, "⚠️ Sesi tamat. Sila mula semula dari /start.")
+        return
+    
+    admin_temp_data[chat_id]["nama"] = nama
+    markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("❌ Batal", callback_data="adm_daftar"))
+    bot.send_message(chat_id, f"💵 Sila hantar **jumlah yuran kena bayar** untuk *{nama}* (Contoh: `350`):", reply_markup=markup, parse_mode="Markdown")
+    bot.register_next_step_handler(message, terima_yuran_pendaftaran)
 
-# ---------------------------------------------------------
-# 8. EXECUTION UTAMA (FLASK + THREADING)
-# ---------------------------------------------------------
+def terima_yuran_pendaftaran(message):
+    if message.text and message.text.startswith("/"):
+        return
+    chat_id = message.chat.id
+    
+    if chat_id not in admin_temp_data:
+        bot.send_message(chat_id, "⚠️ Sesi tamat. Sila mula semula dari /start.")
+        return
+    
+    try:
+        yuran = float(message.text.strip())
+    except ValueError:
+        bot.send_message(chat_id, "❌ Sila masukkan nombor sahaja (Contoh: 350). Cuba hantar semula:")
+        bot.register_next_step_handler(message, terima_yuran_pendaftaran)
+        return
+
+    data = admin_temp_data.pop(chat_id)
+    nama = data["nama"]
+    cawangan = data["cawangan"]
+
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO pelajar (nama, cawangan, yuran_kena_bayar, jumlah_dibayar, status_bayaran, bulan_bayaran) VALUES (%s, %s, %s, 0, 'Belum Lunas', '-')",
+            (nama, cawangan, yuran)
+        )
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("👑 Menu Utama", callback_data="back_start"))
+        bot.send_message(chat_id, f"✅ Berjaya mendaftarkan **{nama}** di **{cawangan}** dengan yuran RM {yuran:.2f}!", reply_markup=markup, parse_mode="Markdown")
+    except Exception as e:
+        bot.send_message(chat_id, f"❌ Ralat database: {e}")
+
+def terima_bulan_bayaran(message):
+    if message.text and message.text.startswith("/"):
+        return
+    chat_id = message.chat.id
+    
+    if chat_id not in admin_temp_data:
+        bot.send_message(chat_id, "⚠️ Sesi tamat. Sila mula semula dari /start.")
+        return
+    
+    bulan = message.text.strip()
+    admin_temp_data[chat_id]["bulan"] = bulan
+    
+    markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("❌ Batal", callback_data="adm_yuran"))
+    bot.send_message(chat_id, f"💵 Sila hantar **jumlah yuran penuh** untuk bulan **{bulan}** (Contoh: `350`):", reply_markup=markup, parse_mode="Markdown")
+    bot.register_next_step_handler(message, terima_jumlah_yuran)
+
+def terima_jumlah_yuran(message):
+    if message.text and message.text.startswith("/"):
+        return
+    chat_id = message.chat.id
+    
+    if chat_id not in admin_temp_data:
+        bot.send_message(chat_id, "⚠️ Sesi tamat. Sila mula semula dari /start.")
+        return
+    
+    try:
+        yuran = float(message.text.strip())
+    except ValueError:
+        bot.send_message(chat_id, "❌ Sila masukkan nombor sahaja. Cuba hantar semula jumlah yuran:")
+        bot.register_next_step_handler(message, terima_jumlah_yuran)
+        return
+
+    admin_temp_data[chat_id]["yuran"] = yuran
+    markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("❌ Batal", callback_data="adm_yuran"))
+    bot.send_message(chat_id, "💵 Sila hantar **jumlah wang yang telah dibayar** (Contoh: `350` atau `200`):", reply_markup=markup, parse_mode="Markdown")
+    bot.register_next_step_handler(message, terima_jumlah_dibayar)
+
+def terima_jumlah_dibayar(message):
+    if message.text and message.text.startswith("/"):
+        return
+    chat_id = message.chat.id
+    
+    if chat_id not in admin_temp_data:
+        bot.send_message(chat_id, "⚠️ Sesi tamat. Sila mula semula dari /start.")
+        return
+    
+    try:
+        dibayar = float(message.text.strip())
+    except ValueError:
+        bot.send_message(chat_id, "❌ Sila masukkan nombor sahaja. Cuba hantar semula jumlah dibayar:")
+        bot.register_next_step_handler(message, terima_jumlah_dibayar)
+        return
+
+    data = admin_temp_data.pop(chat_id)
+    p_id = data["edit_id"]
+    bulan = data["bulan"]
+    yuran = data["yuran"]
+
+    status = "Lunas" if dibayar >= yuran else "Belum Lunas"
+    baki = yuran - dibayar
+
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE pelajar SET yuran_kena_bayar = %s, jumlah_dibayar = %s, status_bayaran = %s, bulan_bayaran = %s WHERE id = %s",
+            (yuran, dibayar, status, bulan, p_id)
+        )
+        cursor.execute("SELECT nama FROM pelajar WHERE id = %s", (p_id,))
+        res = cursor.fetchone()
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        nama_pelajar = res[0] if res else "Pelajar"
+        markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("👑 Menu Utama", callback_data="back_start"))
+        bot.send_message(
+            chat_id,
+            f"✅ Maklumat yuran **{nama_pelajar}** dikemaskini!\n\n"
+            f"• **Bulan:** {bulan}\n"
+            f"• Kena Bayar: RM {yuran:.2f}\n"
+            f"• Sudah Bayar: RM {dibayar:.2f}\n"
+            f"• Baki: RM {baki:.2f}\n"
+            f"• Status: **{status}**",
+            reply_markup=markup,
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        bot.send_message(chat_id, f"❌ Ralat database: {e}")
+
+# --- 6. LOCAL RUN ---
 if __name__ == "__main__":
-  bot_thread = threading.Thread(target=run_bot)
-  bot_thread.daemon = True
-  bot_thread.start()
-
-  port = int(os.environ.get("PORT", 5000))
-  app.run(host="0.0.0.0", port=port)
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
