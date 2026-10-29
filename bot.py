@@ -98,7 +98,7 @@ def get_valid_bucu(df):
     ):
       valid_bucu_highs.append(df["body_high"].iloc[i])
 
-    last_bucu_low = valid_bucu_lows[-1] if valid_bucu_lows else None
+  last_bucu_low = valid_bucu_lows[-1] if valid_bucu_lows else None
   last_bucu_high = valid_bucu_highs[-1] if valid_bucu_highs else None
 
   return last_bucu_high, last_bucu_low
@@ -108,7 +108,7 @@ def get_valid_bucu(df):
 # 4. LOGIK MAJOR TREND (MENGIKUT STRUKTUR BESAR)
 # ---------------------------------------------------------
 def evaluate_major_trend(df):
-  """Menilai trend major berdasarkan arah pecah aras struktur body close terakhir"""
+  """Menilai trend major dengan mengunci status arah breakout terakhir"""
   if df is None or len(df) < 10:
     return "🟡 SIDEWAYS (Data tidak cukup)", 0, 0, 0
 
@@ -116,23 +116,35 @@ def evaluate_major_trend(df):
   df["body_low"] = df[["open", "close"]].min(axis=1)
   df["body_high"] = df[["open", "close"]].max(axis=1)
 
-  # Semak trend major berdasarkan pergerakan struktur bucu terkini
-  major_trend = "🟡 SIDEWAYS (Dalam Range)"
-  active_bucu_high, active_bucu_low = get_valid_bucu(df)
-
   completed_candle = df.iloc[-2]
   close_price = float(completed_candle["close"])
+  active_bucu_high, active_bucu_low = get_valid_bucu(df)
 
-  # Imbas arah breakout terakhir dari struktur major
-  for i in range(10, len(df) - 1):
-    sub_df = df.iloc[:i]
-    bh, bl = get_valid_bucu(sub_df)
-    c_close = df["close"].iloc[i]
+  major_trend = "🟡 SIDEWAYS (Dalam Range)"
 
-    if bl is not None and c_close < bl:
-      major_trend = "🔴 BEARISH (Major Downtrend / Selepas Break Support)"
-    elif bh is not None and c_close > bh:
-      major_trend = "🟢 BULLISH (Major Uptrend / Selepas Break Resistance)"
+  if active_bucu_low is not None and close_price < active_bucu_low:
+    major_trend = "🔴 BEARISH (Breakout Support - Downtrend Major)"
+  elif active_bucu_high is not None and close_price > active_bucu_high:
+    major_trend = "🟢 BULLISH (Breakout Resistance - Uptrend Major)"
+  else:
+    detected_trend = "🟡 SIDEWAYS (Dalam Range)"
+    curr_bh, curr_bl = None, None
+
+    for i in range(5, len(df) - 1):
+      sub_df = df.iloc[:i]
+      bh, bl = get_valid_bucu(sub_df)
+      if bh is not None:
+        curr_bh = bh
+      if bl is not None:
+        curr_bl = bl
+
+      c_close = df["close"].iloc[i]
+      if curr_bl is not None and c_close < curr_bl:
+        detected_trend = "🔴 BEARISH (Downtrend Major / Retrace Zone)"
+      elif curr_bh is not None and c_close > curr_bh:
+        detected_trend = "🟢 BULLISH (Uptrend Major / Pullback Zone)"
+
+    major_trend = detected_trend
 
   return (
       major_trend,
@@ -187,10 +199,10 @@ def telegram_webhook():
 
 
 # ---------------------------------------------------------
-# 7. GELUNG UTAMA BOT (BACKGROUND PROCESS UNTUK ALERT)
+# 7. GELUNG UTAMA BOT (AUTO ALERT M30 BUY & SELL)
 # ---------------------------------------------------------
 def run_bot():
-  print("🤖 Bot Breakout Syezz dimulakan...")
+  print("🤖 Bot Breakout Syezz dimulakan (Auto Alert M30 Buy/Sell)...")
   last_processed_time_m30 = None
 
   while True:
@@ -201,17 +213,36 @@ def run_bot():
         completed_candle = df_m30.iloc[-2]
         current_candle_time = str(completed_candle["time"])
         close_price = float(completed_candle["close"])
-        _, bucu_low = get_valid_bucu(df_m30)
+        bucu_high, bucu_low = get_valid_bucu(df_m30)
 
+        # Semak jika ada candle M30 baharu yang baru selesai tutup
         if current_candle_time != last_processed_time_m30:
+
+          # 1. Alert Breakout Sell / Bearish
           if bucu_low is not None and close_price < bucu_low:
             msg = (
                 f"🚨 *ALERT BREAKOUT BEARISH M30*! 🔴\n\n"
+                f"Candle M30 baharu sahaja *CLOSE* di bawah support!\n"
                 f"• Close Harga: `${close_price:.2f}`\n"
-                f"• Bucu Body Low Tembus: `${bucu_low:.2f}`"
+                f"• Bucu Body Low Tembus: `${bucu_low:.2f}`\n\n"
+                f"_Struktur M30 sah bertukar kepada Downtrend!_"
             )
             send_telegram_message(msg)
             last_processed_time_m30 = current_candle_time
+            print(f"[{datetime.now()}] Alert M30 Bearish dihantar!")
+
+          # 2. Alert Breakout Buy / Bullish
+          elif bucu_high is not None and close_price > bucu_high:
+            msg = (
+                f"🚨 *ALERT BREAKOUT BULLISH M30*! 🟢\n\n"
+                f"Candle M30 baharu sahaja *CLOSE* di atas resistance!\n"
+                f"• Close Harga: `${close_price:.2f}`\n"
+                f"• Bucu Body High Tembus: `${bucu_high:.2f}`\n\n"
+                f"_Struktur M30 sah bertukar kepada Uptrend!_"
+            )
+            send_telegram_message(msg)
+            last_processed_time_m30 = current_candle_time
+            print(f"[{datetime.now()}] Alert M30 Bullish dihantar!")
 
       time.sleep(30)
 
